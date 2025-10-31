@@ -33,11 +33,11 @@ class Facture {
     buffer.writeln('Produits:');
     for (var item in items) {
       buffer.writeln(
-          '- ${item.produit.nom} x${item.quantity} : ${(item.produit.prix ?? 0) * item.quantity} FC');
+          '- ${item.produit.nom} x${item.quantity} : ${(item.produit.prix ?? 0) * item.quantity} F');
     }
-    buffer.writeln('Total: $total FC');
-    buffer.writeln('Rabais: $discount FC');
-    buffer.writeln('Net à payer: $netToPay FC');
+    buffer.writeln('Total: $total F');
+    buffer.writeln('Rabais: $discount F');
+    buffer.writeln('Net à payer: $netToPay F');
     return buffer.toString();
   }
 }

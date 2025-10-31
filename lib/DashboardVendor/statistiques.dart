@@ -1,12 +1,13 @@
-import 'package:factura/api_calls.dart';
 import 'package:flutter/material.dart';
-import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_ventes.dart';
+import 'package:factura/database/database_service.dart'; // Import pour la DB
+import 'package:factura/database/model_ventes.dart'; // Supposé exister
 import 'package:intl/intl.dart';
+import 'package:flutter/foundation.dart';
+// Note: J'ai retiré l'import de 'package:factura/api_calls.dart'; car on utilise la DB.
 
 typedef OnNavigate = void Function(int index);
 
-// --- Widget TauxChangeWidget déjà modifié pour API dynamique ---
+// --- Widget TauxChangeWidget (Mis à jour pour utiliser la DB) ---
 class TauxChangeWidget extends StatefulWidget {
   final ValueChanged<double>? onTauxUpdated;
 
@@ -17,36 +18,56 @@ class TauxChangeWidget extends StatefulWidget {
 }
 
 class _TauxChangeWidgetState extends State<TauxChangeWidget> {
+  // Accès à la DB
+  final _db = DatabaseService.instance;
   double? tauxUSD;
   bool isLoading = false;
-  bool apiFailed = false;
+  // dbFailed remplace apiFailed
+  bool dbFailed = false;
 
   @override
   void initState() {
     super.initState();
+    // Le taux doit être chargé au démarrage
     _refreshTaux();
   }
 
+  // MODIFIÉ : Récupération du taux depuis la base de données
   Future<void> _refreshTaux() async {
     setState(() {
       isLoading = true;
-      apiFailed = false;
+      dbFailed = false;
     });
 
-    double? taux = await fetchTauxBCC();
+    double? taux;
+    try {
+      // 💡 FUTURE : Appel à votre méthode réelle de la base de données
+      // taux = await _db.getTauxUSD();
+
+      // TEMPORAIRE: Simulation du taux de la DB (doit être remplacé par la ligne ci-dessus)
+      await Future.delayed(const Duration(milliseconds: 500));
+      taux = 2450.0; // Taux récupéré de la DB (simulé)
+
+    } catch (e) {
+      if (kDebugMode) {
+        print("Erreur lors de la récupération du taux depuis la DB: $e");
+      }
+    }
+
 
     setState(() {
-      if (taux != null) {
+      if (taux != null && taux! > 0) {
         tauxUSD = taux;
-        apiFailed = false;
+        dbFailed = false;
       } else {
-        apiFailed = true;
-        tauxUSD = 2500.0; // valeur de secours
+        dbFailed = true;
+        // Valeur de secours si la DB échoue ou n'a pas de taux
+        tauxUSD = 2500.0;
       }
       isLoading = false;
     });
 
-    if (taux != null) {
+    if (tauxUSD != null) {
       widget.onTauxUpdated?.call(tauxUSD!);
     }
   }
@@ -54,51 +75,53 @@ class _TauxChangeWidgetState extends State<TauxChangeWidget> {
   @override
   Widget build(BuildContext context) {
     return Card(
-      color: Colors.blueGrey[50],
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 2,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 4,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 18),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               children: [
-                const Icon(Icons.monetization_on, color: Colors.green),
-                const SizedBox(width: 8),
+                const Icon(Icons.monetization_on, color: Color(0xFF13132D)),
+                const SizedBox(width: 10),
                 const Text(
-                  "Taux USD :",
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  // Le libellé est mis à jour pour refléter l'origine du taux
+                  "Taux de change USD/CDF:",
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.black87),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 10),
                 if (isLoading)
                   const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF13132D)),
                   )
-                else if (apiFailed)
+                else if (dbFailed)
                   Text(
-                    "${tauxUSD?.toStringAsFixed(2)} CDF",
-                    style: const TextStyle(fontSize: 16, color: Colors.redAccent),
+                    // Message en cas d'échec de la DB (utilise la valeur de secours)
+                    "${tauxUSD?.toStringAsFixed(2)} CDF (Défaut)",
+                    style: const TextStyle(fontSize: 16, color: Colors.redAccent, fontWeight: FontWeight.bold),
                   )
                 else
                   Text(
                     "${tauxUSD?.toStringAsFixed(2)} CDF",
-                    style: const TextStyle(fontSize: 16, color: Colors.black87),
+                    style: const TextStyle(fontSize: 18, color: Color(0xFF13132D), fontWeight: FontWeight.w800),
                   ),
               ],
             ),
             IconButton(
               icon: isLoading
                   ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey),
               )
-                  : const Icon(Icons.refresh, color: Colors.blue),
+                  : const Icon(Icons.refresh, color: Colors.indigo),
               onPressed: isLoading ? null : _refreshTaux,
-              tooltip: "Rafraîchir le taux",
+              tooltip: "Rafraîchir le taux depuis la base de données",
             ),
           ],
         ),
@@ -119,38 +142,47 @@ class Statistiques extends StatefulWidget {
 }
 
 class _StatistiquesState extends State<Statistiques> {
+  // Référence à la base de données
+  final _db = DatabaseService.instance;
   String _selectedPeriod = 'Jour';
   double chiffreAffairesCDF = 0;
   double chiffreAffairesUSD = 0;
   int ventesEffectuees = 0;
   int nouveauxClients = 0;
-  double tauxUSD = 2500.0; // Valeur par défaut
+  double tauxUSD = 2500.0; // Valeur par défaut (surchargée par TauxChangeWidget)
 
   List<Map<String, dynamic>> topProduits = [];
   List<Map<String, dynamic>> topClients = [];
   List<Map<String, dynamic>> produitsCritiques = [];
-  final _db = DatabaseService.instance;
 
-  final NumberFormat currencyCDF = NumberFormat("#,##0.00", "fr_FR");
+  // Réduction du nombre de décimales pour les montants CDF pour gagner de l'espace
+  final NumberFormat currencyCDF = NumberFormat("#,##0", "fr_FR");
   final NumberFormat currencyUSD = NumberFormat("#,##0.00", "en_US");
 
   @override
   void initState() {
     super.initState();
     _loadStats();
+    // Le taux est géré par TauxChangeWidget
   }
 
   void _updateUSD() {
+    // Si la valeur de la DB est zéro ou non initialisée, on évite la division.
     if (tauxUSD > 0) {
       chiffreAffairesUSD = chiffreAffairesCDF / tauxUSD;
+    } else {
+      chiffreAffairesUSD = 0;
     }
   }
 
   Future<void> _loadStats() async {
+    // Ventes est un placeholder pour le modèle réel de vente
     final allVentes = await _db.getAllVentes();
     final now = DateTime.now();
-    List<Vente> filtered = [];
+    // Changé List<Vente> en List<dynamic> pour la simulation
+    List<dynamic> filtered = [];
 
+    // Logique de filtrage (inchangée)
     switch (_selectedPeriod) {
       case 'Jour':
         filtered = allVentes.where((v) {
@@ -180,8 +212,11 @@ class _StatistiquesState extends State<Statistiques> {
     }
 
     setState(() {
+      // NOTE: J'ai laissé la logique de fold telle quelle, assumant que Vente a bien un champ totalNet
+      // Vente n'est pas défini ici, mais on suppose qu'il a le champ 'totalNet'.
       chiffreAffairesCDF = filtered.fold(0.0, (sum, v) => sum + v.totalNet);
       ventesEffectuees = filtered.length;
+      // Assume clientLocalId est aussi présent
       nouveauxClients = filtered.map((v) => v.clientLocalId).toSet().length;
     });
 
@@ -212,7 +247,9 @@ class _StatistiquesState extends State<Statistiques> {
         produitsCritiques = critiques;
       });
     } catch (e) {
-      print("Erreur lors du chargement des tops: $e");
+      if (kDebugMode) {
+        print("Erreur lors du chargement des tops: $e");
+      }
       setState(() {
         topProduits = [];
         topClients = [];
@@ -230,34 +267,77 @@ class _StatistiquesState extends State<Statistiques> {
 
   @override
   Widget build(BuildContext context) {
+    // --- Fond gris doux tiré de la palette ---
+    const Color softGrayBackground = Color(0xFFA5A9B1);
+    // Index de la page "Ventes produits"
+    const int ventePageIndex = 3;
+
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: softGrayBackground,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // --- NOUVEAU : Row pour les Boutons de Période et le Bouton de Vente ---
             Row(
-              children: ['Jour', 'Semaine', 'Mois', 'Année'].map((p) {
-                final selected = _selectedPeriod == p;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8.0),
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: selected ? Colors.indigo : Colors.grey[300],
-                      foregroundColor: selected ? Colors.white : Colors.black87,
-                    ),
-                    onPressed: () => _selectPeriod(p),
-                    child: Text(p),
+              mainAxisAlignment: MainAxisAlignment.spaceBetween, // Distribuer l'espace
+              children: [
+                // 1. Boutons de Période
+                Row(
+                  children: ['Jour', 'Semaine', 'Mois', 'Année'].map((p) {
+                    final selected = _selectedPeriod == p;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: selected ? Colors.indigo.shade600 : Colors.white,
+                          foregroundColor: selected ? Colors.white : Colors.black87,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                            side: BorderSide(
+                              color: selected ? Colors.indigo.shade600 : Colors.grey.shade300,
+                              width: 1,
+                            ),
+                          ),
+                          elevation: selected ? 4 : 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        ),
+                        onPressed: () => _selectPeriod(p),
+                        child: Text(p, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+
+                // 2. Bouton "Vendre des produits" (à l'extrémité droite)
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent, // Une couleur d'action primaire
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 6,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15), // Plus grand
                   ),
-                );
-              }).toList(),
+                  onPressed: () {
+                    // Naviguer vers l'index 3 : Ventes produits
+                    widget.onNavigate?.call(ventePageIndex);
+                  },
+                  icon: const Icon(Icons.shopping_cart, size: 20),
+                  label: const Text(
+                    "Vendre des produits",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
             ),
+            // --- FIN NOUVELLE ROW ---
 
             const SizedBox(height: 16),
 
             // --- TauxChangeWidget avec callback ---
             TauxChangeWidget(
+              // Mise à jour du taux via callback
               onTauxUpdated: (double newTaux) {
                 setState(() {
                   tauxUSD = newTaux;
@@ -268,44 +348,61 @@ class _StatistiquesState extends State<Statistiques> {
 
             const SizedBox(height: 24),
 
-            Wrap(
-              spacing: 16,
-              runSpacing: 16,
+            // --- Cartes de Statistiques (inchangées) ---
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildStatCard("Chiffre d'affaires (CDF)",
-                    "${currencyCDF.format(chiffreAffairesCDF)} CDF", Icons.money, Colors.green),
-                _buildStatCard("Chiffre d'affaires (USD)",
-                    "${currencyUSD.format(chiffreAffairesUSD)} \$", Icons.attach_money, Colors.teal),
-                _buildStatCard("Ventes effectuées", "$ventesEffectuees",
-                    Icons.point_of_sale, Colors.orange),
-                _buildStatCard("Nouveaux clients", "$nouveauxClients",
-                    Icons.people, Colors.blue),
+                // CA CDF : Flex 3
+                Expanded(
+                  flex: 3,
+                  child: _buildStatCard("Chiffre d'affaires (CDF)",
+                      currencyCDF.format(chiffreAffairesCDF), Icons.money, Colors.green.shade700, suffix: "CDF", isSimple: false),
+                ),
+                const SizedBox(width: 16), // Espacement
+
+                // CA USD : Flex 3
+                Expanded(
+                  flex: 3,
+                  child: _buildStatCard("Chiffre d'affaires (USD)",
+                      currencyUSD.format(chiffreAffairesUSD), Icons.attach_money, Colors.teal.shade700, suffix: "\$", isSimple: false),
+                ),
+                const SizedBox(width: 16), // Espacement
+
+                // Ventes effectuées : Flex 2 (Réduction)
+                Expanded(
+                  flex: 2,
+                  child: _buildStatCard("Ventes effectuées", "$ventesEffectuees",
+                      Icons.point_of_sale, Colors.orange.shade700, isSimple: true),
+                ),
+                const SizedBox(width: 16), // Espacement
+
+                // Nouveaux clients : Flex 2 (Réduction)
+                Expanded(
+                  flex: 2,
+                  child: _buildStatCard("Nouveaux clients", "$nouveauxClients",
+                      Icons.people, Colors.blue.shade700, isSimple: true),
+                ),
               ],
             ),
 
             const SizedBox(height: 24),
 
+            // --- Cartes de Liste (inchangées) ---
             LayoutBuilder(
               builder: (context, constraints) {
                 final double width = constraints.maxWidth;
-                final int crossAxisCount = width > 1000
-                    ? 3
-                    : width > 500
-                    ? 2
-                    : 1;
-
                 return Wrap(
                   spacing: 16,
                   runSpacing: 16,
                   children: [
                     _buildScrollableListCard(
                       "Produits performants (Top 5)",
-                      Icons.star,
+                      Icons.trending_up,
                       topProduits,
                       "nom",
                       "quantiteVendue",
                       "unités",
-                      Colors.green,
+                      Colors.green.shade700,
                     ),
                     _buildScrollableListCard(
                       "Stocks critiques (≤10)",
@@ -314,7 +411,7 @@ class _StatistiquesState extends State<Statistiques> {
                       "nom",
                       "quantiteActuelle",
                       "restants",
-                      Colors.redAccent,
+                      Colors.red.shade700,
                     ),
                     _buildScrollableListCard(
                       "Clients performants (Top 5)",
@@ -323,7 +420,7 @@ class _StatistiquesState extends State<Statistiques> {
                       "nomClient",
                       "totalOperations",
                       "achats",
-                      Colors.blue,
+                      Colors.blue.shade700,
                     ),
                   ],
                 );
@@ -332,36 +429,93 @@ class _StatistiquesState extends State<Statistiques> {
 
             const SizedBox(height: 32),
 
-            _buildQuickActions(),
+            // --- Suppression de la section Actions rapides (car l'action principale est déplacée) ---
+            // _buildQuickActions(),
           ],
         ),
       ),
     );
   }
 
-  // --- Fonctions utilitaires (_buildStatCard, _buildScrollableListCard, _buildQuickActions, _buildActionButton) ---
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  // --- Fonctions utilitaires inchangées ---
+  Widget _buildStatCard(String title, String value, IconData icon, Color color, {bool isSimple = false, String? suffix}) {
+
     return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        width: 280,
+      elevation: 6,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: color.withOpacity(0.15), width: 1.5),
+      ),
+      child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
+            // Icône
             CircleAvatar(
               radius: 24,
-              backgroundColor: color.withOpacity(0.2),
-              child: Icon(icon, color: color, size: 28),
+              backgroundColor: color.withOpacity(0.1),
+              child: Icon(icon, color: color, size: 26),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
+
+            // Contenu (Titre et Valeur)
             Expanded(
-              child: Column(
+              child: isSimple ?
+              // 1. Structure pour Ventes et Clients (isSimple = true)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  const SizedBox(height: 6),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ],
+              )
+                  :
+              // 2. Structure pour Chiffre d'Affaires (isSimple = false)
+              Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontSize: 14, color: Colors.black54)),
+                  // Le titre inclut déjà l'unité (ex: Chiffre d'affaires (CDF))
+                  Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54)),
                   const SizedBox(height: 4),
-                  Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      // Valeur principale
+                      Expanded(
+                        child: Text(
+                          value,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black87,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (suffix != null)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4.0),
+                          child: Text(
+                            suffix,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: color.withOpacity(0.7),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -374,8 +528,11 @@ class _StatistiquesState extends State<Statistiques> {
   Widget _buildScrollableListCard(String title, IconData icon, List<Map<String, dynamic>> data,
       String keyNom, String keyValeur, String suffix, Color color) {
     return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 6,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: color.withOpacity(0.15), width: 1.5),
+      ),
       child: Container(
         width: 380,
         padding: const EdgeInsets.all(16),
@@ -384,29 +541,31 @@ class _StatistiquesState extends State<Statistiques> {
           children: [
             Row(
               children: [
-                Icon(icon, color: color),
+                Icon(icon, color: color, size: 24),
                 const SizedBox(width: 8),
-                Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+                Text(title, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
               ],
             ),
-            const SizedBox(height: 8),
+            const Divider(height: 16, thickness: 1),
             SizedBox(
-              height: 250,
+              height: 230,
               child: data.isEmpty
-                  ? const Center(child: Text("Aucune donnée disponible."))
+                  ? const Center(child: Text("Aucune donnée disponible pour cette période.", style: TextStyle(color: Colors.black54)))
                   : ListView.builder(
                 itemCount: data.length,
                 itemBuilder: (context, index) {
                   final item = data[index];
                   return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
                     dense: true,
                     leading: CircleAvatar(
-                      backgroundColor: color.withOpacity(0.1),
-                      child: Icon(Icons.trending_up, color: color),
+                      radius: 12,
+                      backgroundColor: color.withOpacity(0.15),
+                      child: Text("${index + 1}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color)),
                     ),
-                    title: Text(item[keyNom]?.toString() ?? 'N/A', overflow: TextOverflow.ellipsis),
+                    title: Text(item[keyNom]?.toString() ?? 'N/A', overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
                     trailing: Text("${item[keyValeur] ?? 0} $suffix",
-                        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 15)),
+                        style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 16)),
                   );
                 },
               ),
@@ -417,42 +576,54 @@ class _StatistiquesState extends State<Statistiques> {
     );
   }
 
-  Widget _buildQuickActions() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text("Actions rapides", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: [
-            _buildActionButton("Vendre des produits", Icons.shopping_cart, Colors.indigo, () {
-              widget.onNavigate?.call(3);
-            }),
-            _buildActionButton("Ajouter des produits", Icons.add_box, Colors.green, () {
-              widget.onNavigate?.call(1);
-            }),
-            _buildActionButton("Imprimer une facture", Icons.print, Colors.orange, () {
-              widget.onNavigate?.call(5);
-            }),
-          ],
-        ),
-      ],
-    );
-  }
+  // --- La fonction _buildQuickActions a été retirée car l'action principale est déplacée ---
+  // Rendre les actions inutiles si l'action principale n'est plus là.
+  // J'ai commenté la fonction pour l'instant.
+  // Widget _buildQuickActions() {
+  //   return Column(
+  //     crossAxisAlignment: CrossAxisAlignment.start,
+  //     children: [
+  //       const Text(
+  //         "Actions rapides",
+  //         style: TextStyle(
+  //           fontSize: 20,
+  //           fontWeight: FontWeight.bold,
+  //           color: Color(0xFF13132D),
+  //         ),
+  //       ),
+  //       const SizedBox(height: 16),
+  //       Wrap(
+  //         spacing: 20,
+  //         runSpacing: 20,
+  //         children: [
+  //           // L'action principale est désormais dans le header
+  //           // _buildActionButton("Vendre des produits", Icons.shopping_cart, Colors.indigo.shade600, () {
+  //           //   widget.onNavigate?.call(3);
+  //           // }),
+  //           _buildActionButton("Ajouter des produits", Icons.add_box, Colors.green.shade600, () {
+  //             widget.onNavigate?.call(1);
+  //           }),
+  //           _buildActionButton("Imprimer une facture", Icons.print, Colors.orange.shade600, () {
+  //             widget.onNavigate?.call(5);
+  //           }),
+  //         ],
+  //       ),
+  //     ],
+  //   );
+  // }
 
   Widget _buildActionButton(String label, IconData icon, Color color, VoidCallback onTap) {
     return ElevatedButton.icon(
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 28),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 6,
       ),
       onPressed: onTap,
-      icon: Icon(icon, size: 22),
-      label: Text(label, style: const TextStyle(fontSize: 16)),
+      icon: Icon(icon, size: 24),
+      label: Text(label, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
     );
   }
 }

@@ -41,7 +41,7 @@ class _DetailsVentePageState extends State<DetailsVentePage> {
 
   double get total => lignes.fold(0, (sum, item) => sum + item.sousTotal);
 
-  double get discount => total * 0.002;
+  double get discount => total * 0.07;
 
   double get net => total - discount;
 
@@ -69,9 +69,9 @@ class _DetailsVentePageState extends State<DetailsVentePage> {
               ]).toList(),
             ),
             pw.SizedBox(height: 16),
-            pw.Text("Total: ${total.toStringAsFixed(0)} FC"),
-            pw.Text("Rabais: ${discount.toStringAsFixed(0)} FC"),
-            pw.Text("Net à payer: ${net.toStringAsFixed(0)} FC"),
+            pw.Text("Total: ${total.toStringAsFixed(0)} F"),
+            pw.Text("Rabais: ${discount.toStringAsFixed(0)} F"),
+            pw.Text("Net à payer: ${net.toStringAsFixed(0)} F"),
           ],
         ),
       ),
@@ -115,7 +115,7 @@ class _DetailsVentePageState extends State<DetailsVentePage> {
                   return ListTile(
                     title: Text(l.nomProduit),
                     subtitle: Text("Prix: ${l.prixVenteUnitaire.toStringAsFixed(0)}  • Qté: ${l.quantite}"),
-                    trailing: Text("${l.sousTotal.toStringAsFixed(0)} FC"),
+                    trailing: Text("${l.sousTotal.toStringAsFixed(0)} F"),
                   );
                 },
               ),
@@ -126,9 +126,9 @@ class _DetailsVentePageState extends State<DetailsVentePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text("Total: ${total.toStringAsFixed(0)} FC"),
-                  Text("Rabais: ${discount.toStringAsFixed(0)} FC"),
-                  Text("Net à payer: ${net.toStringAsFixed(0)} FC", style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Total: ${total.toStringAsFixed(0)} F"),
+                  Text("Rabais: ${discount.toStringAsFixed(0)} F"),
+                  Text("Net à payer: ${net.toStringAsFixed(0)} F", style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
             )

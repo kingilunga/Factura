@@ -1,6 +1,7 @@
 import 'package:factura/Superadmin/logs_page.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:factura/database/database_service.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -46,17 +47,27 @@ class _SettingsPageState extends State<SettingsPage> {
     if (value is double) await prefs.setDouble(key, value);
   }
 
+  // --- Réinitialisation de la base locale ---
   Future<void> _resetLocalDB() async {
-    // Ici tu peux appeler ta méthode de reset DB
+    await DatabaseService.instance.resetDatabase();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Base locale réinitialisée !')),
     );
   }
 
+  // --- Vider le cache ---
   Future<void> _clearCache() async {
     // Ici tu peux vider le cache local
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Cache local vidé !')),
+    );
+  }
+
+  // --- Modifier mot de passe SuperAdmin ---
+  Future<void> _changeSuperAdminPassword(String newPassword) async {
+    await DatabaseService.instance.updateSuperAdminPassword(newPassword);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Mot de passe SuperAdmin mis à jour !')),
     );
   }
 
@@ -106,8 +117,35 @@ class _SettingsPageState extends State<SettingsPage> {
           ListTile(
             leading: const Icon(Icons.lock),
             title: const Text("Changer mot de passe SuperAdmin"),
-            onTap: () {
-              // Ouvre modal de modification mot de passe
+            onTap: () async {
+              final ctrl = TextEditingController();
+              await showDialog(
+                context: context,
+                builder: (_) => AlertDialog(
+                  title: const Text("Nouveau mot de passe"),
+                  content: TextField(
+                    controller: ctrl,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      hintText: "Entrez le nouveau mot de passe",
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Annuler")),
+                    TextButton(
+                      onPressed: () {
+                        if (ctrl.text.isNotEmpty) {
+                          _changeSuperAdminPassword(ctrl.text);
+                        }
+                        Navigator.pop(context);
+                      },
+                      child: const Text("Enregistrer"),
+                    ),
+                  ],
+                ),
+              );
             },
           ),
           const Divider(),
@@ -123,7 +161,6 @@ class _SettingsPageState extends State<SettingsPage> {
               );
             },
           ),
-
           ListTile(
             leading: const Icon(Icons.cleaning_services_outlined),
             title: const Text("Vider le cache local"),
@@ -139,7 +176,8 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text("Vérifier les mises à jour"),
             onTap: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Vérification des mises à jour en cours...")),
+                const SnackBar(
+                    content: Text("Vérification des mises à jour en cours...")),
               );
             },
           ),
@@ -184,7 +222,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       decoration: const InputDecoration(suffixText: "%"),
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler")),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text("Annuler")),
                       TextButton(
                         onPressed: () {
                           final val = double.tryParse(ctrl.text);
@@ -203,10 +243,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
-
   Widget _sectionTitle(String title) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 8.0),
     child: Text(title,
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+        style: const TextStyle(
+            fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
   );
 }

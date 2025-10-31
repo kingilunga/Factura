@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle; // Pour charger l'image asset
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:factura/database/database_service.dart';
 import 'package:factura/database/model_ventes.dart';
 import 'package:factura/database/model_clients.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:pdf/pdf.dart'; // Ajouté pour les couleurs et le format d'image
+import 'package:pdf/pdf.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
-import 'dart:typed_data'; // Pour le type d'image
+import 'dart:typed_data';
 
 class HistoriqueVentes extends StatefulWidget {
   const HistoriqueVentes({super.key});
@@ -64,6 +64,67 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
     });
   }
 
+  // --- LOGIQUE DE SUPPRESSION AJOUTÉE ---
+
+  Future<void> deleteVente(Vente vente) async {
+    if (vente.localId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Erreur: ID de vente local manquant.')),
+      );
+      return;
+    }
+
+    try {
+      // Supprime la vente. Assumons que db.deleteVente(id) gère aussi la suppression
+      // des LigneVente associées (suppression en cascade).
+      await db.deleteVente(vente.localId!);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Facture ${vente.venteId} supprimée avec succès.')),
+      );
+
+      // Nettoyer les caches et recharger la liste
+      lignesCache.remove(vente.localId!);
+      clientsCache.remove(vente.localId!);
+      await loadVentes();
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur lors de la suppression: $e')),
+      );
+    }
+  }
+
+  void _showDeleteConfirmationDialog(Vente vente) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirmer la suppression'),
+          content: Text('Êtes-vous sûr de vouloir supprimer la facture ${vente.venteId} et tous ses détails ? Cette action est irréversible.'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              onPressed: () {
+                Navigator.of(context).pop();
+                deleteVente(vente);
+              },
+              child: const Text('Supprimer'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // --- FIN LOGIQUE DE SUPPRESSION ---
+
   Future<void> showVenteDetails(Vente vente) async {
     // 1. Récupérer et cacher le client
     Client? client;
@@ -111,18 +172,18 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                 rows: lignes.map((l) {
                   return DataRow(cells: [
                     DataCell(Text(l.nomProduit ?? '')),
-                    DataCell(Text('${l.prixVenteUnitaire?.toStringAsFixed(0) ?? '0'} FC')),
+                    DataCell(Text('${l.prixVenteUnitaire?.toStringAsFixed(0) ?? '0'} F')),
                     DataCell(Text('${l.quantite}')),
-                    DataCell(Text('${l.sousTotal?.toStringAsFixed(0) ?? '0'} FC')),
+                    DataCell(Text('${l.sousTotal?.toStringAsFixed(0) ?? '0'} F')),
                   ]);
                 }).toList(),
               ),
               const Divider(),
-              Text("Total Brut: ${vente.totalBrut.toStringAsFixed(0)} FC"),
-              Text("Réduction: ${vente.reductionPercent.toStringAsFixed(0)} FC"),
+              Text("Total Brut: ${vente.totalBrut.toStringAsFixed(0)} F"),
+              Text("Réduction: ${vente.reductionPercent.toStringAsFixed(0)} F"),
               const SizedBox(height: 4),
               Text(
-                "NET À PAYER: ${vente.totalNet.toStringAsFixed(0)} FC",
+                "NET À PAYER: ${vente.totalNet.toStringAsFixed(0)} F",
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueAccent),
               ),
             ],
@@ -235,7 +296,7 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                 2: const pw.FlexColumnWidth(1), // Quantité
                 3: const pw.FlexColumnWidth(1.5), // Sous-Total
               },
-              headers: ["Désignation", "Prix Unit. (FC)", "Quantité", "Sous-Total (FC)"],
+              headers: ["Désignation", "Prix Unit. (F)", "Quantité", "Sous-Total (F)"],
               data: lignes.map((l) => [
                 l.nomProduit,
                 l.prixVenteUnitaire.toStringAsFixed(0),
@@ -265,7 +326,7 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                             color: PdfColor.fromInt(Colors.blue.shade50.value),
                             border: pw.Border.all(color: PdfColor.fromInt(Colors.blue.value))
                         ),
-                        child: _buildTotalRow("NET À PAYER (FC):", vente.totalNet, true),
+                        child: _buildTotalRow("NET À PAYER (F):", vente.totalNet, true),
                       ),
                     ],
                   ),
@@ -318,7 +379,7 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                 : const pw.TextStyle(fontSize: 10),
           ),
           pw.Text(
-            '${amount.toStringAsFixed(0)} FC',
+            '${amount.toStringAsFixed(0)} F',
             style: isFinal
                 ? pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12, color: PdfColor.fromInt(Colors.blue.value))
                 : const pw.TextStyle(fontSize: 10),
@@ -329,7 +390,6 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
   }
 
   Future<void> savePdfLocally(pw.Document pdf, String fileName) async {
-    // ... (Reste de la fonction savePdfLocally inchangé)
     final bytes = await pdf.save();
     // Assure-toi que le nom du fichier ne contient pas de caractères invalides
     final safeFileName = fileName.replaceAll(RegExp(r'[^\w\s]+'), '_');
@@ -409,6 +469,7 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                     DataColumn(label: Text("Total Net")),
                     DataColumn(label: Text("Statut")),
                     DataColumn(label: Text("Détails")),
+                    DataColumn(label: Text("Supprimer")), // NOUVELLE COLONNE
                   ],
                   rows: filteredVentes.map((v) {
                     // S'assurer que le client est chargé pour l'affichage
@@ -434,6 +495,12 @@ class _HistoriqueVentesState extends State<HistoriqueVentes> {
                         icon: Icon(Icons.remove_red_eye, color: Colors.blue.shade700),
                         onPressed: () => showVenteDetails(v),
                         tooltip: 'Voir les détails et exporter',
+                      )),
+                      // NOUVELLE CELLULE POUR LA SUPPRESSION
+                      DataCell(IconButton(
+                        icon: Icon(Icons.delete_forever, color: Colors.red.shade700),
+                        onPressed: () => _showDeleteConfirmationDialog(v),
+                        tooltip: 'Supprimer cette vente',
                       )),
                     ]);
                   }).toList(),

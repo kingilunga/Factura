@@ -183,7 +183,7 @@ class DatabaseService {
       )
     ''');
 
-    // --- Table Ventes ---
+    // --- Table Ventes (ATTENTION: dateVente DOIT être un ISO String 'YYYY-MM-DD HH:MM:SS.SSS') ---
     await db.execute('''
       CREATE TABLE $ventesTable (
         localId $idType,
@@ -231,12 +231,46 @@ class DatabaseService {
   }
 
   // ======================================================================
-  // --- NOUVELLES FONCTIONS POUR LE TABLEAU DE BORD ---
+  // --- NOUVELLE LOGIQUE DE FILTRAGE TEMPOREL ---
   // ======================================================================
 
-  /// 1. Calcul des Statistiques Globales (KPIs)
+  /// Helper pour calculer la date de début de la période
+  String _getDateStartOfPeriod(String period) {
+    DateTime now = DateTime.now();
+    DateTime startDate;
+
+    switch (period) {
+      case 'Journalière': // Jour
+        startDate = DateTime(now.year, now.month, now.day);
+        break;
+      case 'Hebdomadaire': // Semaine (7 derniers jours)
+        startDate = now.subtract(const Duration(days: 7));
+        break;
+      case 'Mensuelle': // Mois
+        startDate = DateTime(now.year, now.month, 1);
+        break;
+      case 'Annuelle': // Année
+        startDate = DateTime(now.year, 1, 1);
+        break;
+      default:
+      // Par défaut, nous prenons la dernière semaine
+        startDate = now.subtract(const Duration(days: 7));
+        break;
+    }
+    // Formatte la date en chaîne ISO8601 pour la comparaison SQL
+    return startDate.toIso8601String();
+  }
+
+
+  // ======================================================================
+  // --- FONCTIONS DU TABLEAU DE BORD MISES À JOUR ---
+  // ======================================================================
+
+  /// 1. Calcul des Statistiques Globales (KPIs) - MIS À JOUR
   Future<AdminStats> fetchAdminStats({required String period}) async {
     final db = await database;
+    final startDateString = _getDateStartOfPeriod(period);
+
     try {
       final salesResult = await db.rawQuery('''
         SELECT 
@@ -244,7 +278,10 @@ class DatabaseService {
           COUNT(localId) as totalVentes
         FROM $ventesTable
         WHERE statut = 'validée'
-      ''');
+        AND dateVente >= ?
+      ''', [startDateString]); // Utilisation de la date de début
+
+      // Les KPIs Client et Produit ne changent pas selon la période (stock/total)
       final clientResult = await db.rawQuery('SELECT COUNT(localId) as totalClients FROM $clientsTable');
       final productResult = await db.rawQuery('SELECT COUNT(localId) as totalProduits FROM $produitsTable');
 
@@ -260,15 +297,16 @@ class DatabaseService {
         totalProduits: totalProduits,
       );
     } catch (e) {
-      print("Erreur lors du calcul des statistiques admin: $e");
+      print("Erreur lors du calcul des statistiques admin ($period): $e");
       return AdminStats();
     }
   }
 
-  /// 2. Aperçu des Ventes Récentes
-  Future<List<VenteRecenteApercu>> fetchRecentSales({int limit = 5}) async {
+  /// 2. Aperçu des Ventes Récentes - MIS À JOUR (filtré par temps)
+  Future<List<VenteRecenteApercu>> fetchRecentSales({int limit = 5, String period = 'Hebdomadaire'}) async {
     final db = await database;
-    // On joint les tables Ventes et Lignes de Vente pour avoir les détails
+    final startDateString = _getDateStartOfPeriod(period);
+
     final result = await db.rawQuery('''
       SELECT 
         V.dateVente, 
@@ -278,20 +316,20 @@ class DatabaseService {
       FROM $lignesVenteTable LV
       JOIN $ventesTable V ON LV.venteLocalId = V.localId
       WHERE V.statut = 'validée'
+      AND V.dateVente >= ?
       ORDER BY V.dateVente DESC
       LIMIT ?
-    ''', [limit]);
+    ''', [startDateString, limit]);
 
     return result.map((item) => VenteRecenteApercu(
       dateVente: item['dateVente'] as String? ?? 'N/A',
       produitNom: item['nomProduit'] as String? ?? 'Produit Inconnu',
       vendeurNom: item['vendeurNom'] as String? ?? 'Vendeur Inconnu',
-      // Dans le dashboard, on affiche un aperçu, donc on utilise le sousTotal (ou totalNet si l'on voulait agréger)
       montantNet: (item['sousTotal'] as num?)?.toDouble() ?? 0.0,
     )).toList();
   }
 
-  /// 3. Produits en Stock Critique
+  /// 3. Produits en Stock Critique (Ne nécessite PAS de filtre temporel)
   Future<List<ProduitApercu>> fetchLowStockProducts({int threshold = 5, int limit = 5}) async {
     final db = await database;
     final result = await db.query(
@@ -316,10 +354,10 @@ class DatabaseService {
     }).toList();
   }
 
-  /// 4. Produits les Plus Vendus (RÉSOLUTION DE L'ERREUR)
-  // Utilise une jointure SQL pour calculer la quantité totale vendue par produit
-  Future<List<ProduitApercu>> fetchTopSellingProducts({int limit = 5}) async {
+  /// 4. Produits les Plus Vendus - MIS À JOUR (filtré par temps)
+  Future<List<ProduitApercu>> fetchTopSellingProducts({int limit = 5, String period = 'Hebdomadaire'}) async {
     final db = await database;
+    final startDateString = _getDateStartOfPeriod(period);
 
     // Jointure entre les lignes de vente et les produits pour agréger la quantité vendue
     final result = await db.rawQuery('''
@@ -329,10 +367,12 @@ class DatabaseService {
         SUM(LV.quantite) as totalQuantiteVendue
       FROM $lignesVenteTable LV
       JOIN $produitsTable P ON LV.produitLocalId = P.localId
+      JOIN $ventesTable V ON LV.venteLocalId = V.localId
+      WHERE V.dateVente >= ?
       GROUP BY P.localId, P.nom, P.prix
       ORDER BY totalQuantiteVendue DESC
       LIMIT ?
-    ''', [limit]);
+    ''', [startDateString, limit]);
 
     return result.map((item) => ProduitApercu(
       nom: item['nom'] as String,
@@ -344,19 +384,22 @@ class DatabaseService {
   }
 
 
-  /// 5. Aperçu des Clients (Top acheteurs)
-  Future<List<ClientApercu>> fetchClientOverview({int limit = 5}) async {
+  /// 5. Aperçu des Clients (Top acheteurs) - MIS À JOUR (filtré par temps)
+  Future<List<ClientApercu>> fetchClientOverview({int limit = 5, String period = 'Hebdomadaire'}) async {
     final db = await database;
+    final startDateString = _getDateStartOfPeriod(period);
+
     final result = await db.rawQuery('''
       SELECT 
         C.nomClient, 
         COUNT(V.localId) as totalOperations 
       FROM $clientsTable C
-      LEFT JOIN $ventesTable V ON C.localId = V.clientLocalId
+      LEFT JOIN $ventesTable V 
+      ON C.localId = V.clientLocalId AND V.dateVente >= ?
       GROUP BY C.nomClient
       ORDER BY totalOperations DESC, C.nomClient ASC
       LIMIT ?
-    ''', [limit]);
+    ''', [startDateString, limit]);
 
     return result.map((item) => ClientApercu(
       nomClient: item['nomClient'] as String,
@@ -365,25 +408,29 @@ class DatabaseService {
     )).toList();
   }
 
-  /// 6. TENDANCES DE VENTES POUR GRAPHIQUE (AGRÉGATION SQL RÉELLE)
+
+  /// 6. TENDANCES DE VENTES POUR GRAPHIQUE (AGRÉGATION SQL RÉELLE) (Inchangé, car déjà filtré)
   Future<List<VenteTendance>> fetchSalesTrends(String period) async {
     final db = await database;
     String dateGroupFormat;
-    int limit;
+    String startDateString;
 
     switch (period) {
       case 'Annuelle':
         dateGroupFormat = '%Y'; // Groupe par Année
-        limit = 5; // Les 5 dernières années
+        // On prend les 5 dernières années, donc on recule
+        startDateString = DateTime(DateTime.now().year - 4, 1, 1).toIso8601String();
         break;
       case 'Mensuelle':
         dateGroupFormat = '%Y-%m'; // Groupe par Année-Mois
-        limit = 12; // Les 12 derniers mois
+        // On prend les 12 derniers mois
+        startDateString = DateTime(DateTime.now().year, DateTime.now().month - 11, 1).toIso8601String();
         break;
       case 'Hebdomadaire':
       default:
         dateGroupFormat = '%Y-%m-%d'; // Groupe par Jour (pour avoir la tendance Hebdo)
-        limit = 7; // Les 7 derniers jours
+        // On prend les 7 derniers jours
+        startDateString = DateTime.now().subtract(const Duration(days: 6)).toIso8601String().split('T').first;
         break;
     }
 
@@ -395,11 +442,12 @@ class DatabaseService {
           SUM(totalNet) AS total
         FROM $ventesTable
         WHERE statut = 'validée'
+        AND dateVente >= ?
         GROUP BY dateLabel
         ORDER BY dateLabel DESC
-        LIMIT $limit
-      ''');
+      ''', [startDateString]);
 
+      // Note: On utilise result.reversed.toList() pour s'assurer que les dates sont dans l'ordre croissant pour le graphique.
       return result.reversed.map((item) => VenteTendance(
         label: item['dateLabel'] as String,
         montant: (item['total'] as num?)?.toDouble() ?? 0.0,
@@ -407,11 +455,13 @@ class DatabaseService {
 
     } catch (e) {
       print("Erreur lors de la récupération des tendances de ventes ($period): $e");
-      // Retourne une liste vide en cas d'erreur
       return [];
     }
   }
 
+  // ======================================================================
+  // --- FIN DES MISES À JOUR DU TABLEAU DE BORD ---
+  // ======================================================================
 
   // ======================================================================
   // --- MISE À JOUR DU STOCK (Existantes) ---
@@ -619,7 +669,7 @@ class DatabaseService {
   }
 
   Future<List<Vente>> getVentesByDate(DateTime date) async {
-    final db = await instance.database;
+    final db = await database;
     final dateStr = date.toIso8601String().split('T').first;
     final result = await db.query(
       ventesTable,
@@ -631,7 +681,7 @@ class DatabaseService {
   }
 
   Future<void> deleteVente(int localId) async {
-    final db = await instance.database;
+    final db = await database;
     await db.delete(lignesVenteTable, where: 'venteLocalId = ?', whereArgs: [localId]);
     await db.delete(ventesTable, where: 'localId = ?', whereArgs: [localId]);
   }
@@ -885,6 +935,7 @@ class DatabaseService {
   Future<List<Utilisateur>> getAllUtilisateurs() async {
     return await fetchAllUsers();
   }
+
   // 📁 database_service.dart
 
   Future<void> updatePassword(int localId, String newPassword) async {
@@ -892,7 +943,7 @@ class DatabaseService {
     await db.update(
       usersTable, // ⚠️ nom de ta table utilisateurs
       {
-        'motDePasse': newPassword, // ⚠️ adapte le nom de la colonne si différent
+        'motDePasseHash': newPassword,
       },
       where: 'localId = ?',
       whereArgs: [localId],
@@ -911,4 +962,40 @@ class DatabaseService {
     await close();
     await database; // cela recrée la base au prochain accès
   }
+  Future<void> clearAllExceptUsers() async {
+    final db = await database;
+
+    // Récupérer toutes les tables
+    final tables = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+    );
+
+    for (var table in tables) {
+      final tableName = table['name'] as String;
+
+      // Ne pas supprimer les utilisateurs
+      if (tableName != usersTable) { // Utiliser la variable de classe
+        await db.delete(tableName);
+      }
+    }
+  }
+
+  Future<void> resetDatabase() async {
+    final db = await database; // ta référence SQLite
+    await db.execute("DELETE FROM produits");
+    await db.execute("DELETE FROM clients");
+    await db.execute("DELETE FROM ventes");
+    // répéter pour toutes les tables
+  }
+  /// Met à jour le mot de passe du SuperAdmin
+  Future<void> updateSuperAdminPassword(String newPassword) async {
+    final db = await instance.database; // récupère l'instance SQLite ouverte
+    await db.update(
+      'superadmin',                  // nom de la table
+      {'password': newPassword},     // nouvelle valeur
+      where: 'username = ?',         // condition
+      whereArgs: ['SuperAdmin'],     // valeur pour la condition
+    );
+  }
+
 }

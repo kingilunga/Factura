@@ -1,8 +1,9 @@
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:factura/DashboardVendor/historique_ventes.dart';
+import 'package:factura/DashboardVendor/pdf_preview.dart';
+import 'package:factura/pdf_generator_service.dart' as pdf_service;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -54,6 +55,8 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   // Compteur séquentiel simple
   int _salesCounter = 0;
 
+  // Mode de paiement par défaut
+  String _modePaiement = 'CASH';
 
   // --- Initialisation et Nettoyage ---
 
@@ -62,7 +65,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     super.initState();
     loadClients();
     loadProducts();
-    _loadSalesCounter(); // Charger le dernier compteur utilisé
+    _loadSalesCounter();
 
     clientSearchController.addListener(() {
       if (clientSearchController.text.isEmpty) {
@@ -98,7 +101,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
 
-  // --- Chargement et Filtrage (Reste inchangé) ---
+  // --- Chargement et Filtrage ---
 
   Future<void> loadClients() async {
     final loaded = await db.getAllClients();
@@ -166,7 +169,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     });
   }
 
-  // --- Logique Panier et Client (Reste inchangé) ---
+  // --- Logique Panier et Client ---
 
   Future<void> addClient() async {
     final name = nameController.text.trim();
@@ -200,10 +203,23 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   void addProductToCart(Produit produit) {
+    // ⚙️ VÉRIFICATION DE STOCK LÉGÈRE AVANT D'AJOUTER
+    final stockDispo = produit.quantiteActuelle ?? 0;
+    final existingItem = cart.indexWhere((c) => c.produit.localId == produit.localId);
+    final currentQuantity = existingItem >= 0 ? cart[existingItem].quantity : 0;
+
+    if (currentQuantity >= stockDispo) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Stock maximal atteint pour ${produit.nom}. Stock disponible: $stockDispo")),
+        );
+      }
+      return;
+    }
+
     setState(() {
-      final index = cart.indexWhere((c) => c.produit.localId == produit.localId);
-      if (index >= 0) {
-        cart[index].quantity += 1;
+      if (existingItem >= 0) {
+        cart[existingItem].quantity += 1;
       } else {
         cart.add(CartItem(produit: produit));
       }
@@ -214,32 +230,45 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   void updateQuantity(CartItem item, int delta) {
+    // ⚙️ VÉRIFICATION DE STOCK LORS DE L'AUGMENTATION
+    final stockDispo = item.produit.quantiteActuelle ?? 0;
+    final newQuantity = item.quantity + delta;
+
+    if (delta > 0 && newQuantity > stockDispo) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Stock maximal atteint pour ${item.produit.nom}. Stock disponible: $stockDispo")),
+        );
+      }
+      return;
+    }
+
     setState(() {
-      item.quantity += delta;
+      item.quantity = newQuantity;
       if (item.quantity <= 0) cart.remove(item);
     });
   }
 
   // --- Calculs ---
   double get total => cart.fold(0, (sum, item) => sum + (item.produit.prix ?? 0) * item.quantity);
-  double get discount => total * 0.002;
-  double get netToPay => total - discount;
+  // ⚙️ Votre logique de réduction : 8% du total brut
+  double get discountAmount => total * 0.06;
+  double get netToPay => total - discountAmount;
 
   // --- Création vente / lignes ---
 
   Vente createVente({bool isDraft = false}) {
-    // ⚙️ NOUVELLE LOGIQUE POUR UN NUMÉRO SÉQUENTIEL SIMPLE (FV-001, FV-002...)
-    // Si c'est un brouillon, on utilise un ID temporaire
+    // ⚙️ LOGIQUE POUR UN NUMÉRO SÉQUENTIEL SIMPLE (FV-001, FV-002...)
     final sequence = (_salesCounter + (isDraft ? 1 : 1)).toString().padLeft(3, '0');
     final newVenteId = 'FV-$sequence';
 
     return Vente(
-      venteId: newVenteId, // Numéro de facture simple
+      venteId: newVenteId,
       dateVente: DateTime.now().toIso8601String(),
       clientLocalId: selectedClient!.localId!,
-      vendeurNom: 'Vendeur',
+      vendeurNom: 'Vendeur', // À remplacer par le nom de l'utilisateur connecté
       totalBrut: total,
-      reductionPercent: discount,
+      reductionPercent: discountAmount, // Stocke le montant de la réduction
       totalNet: netToPay,
       statut: isDraft ? 'brouillon' : 'validée',
     );
@@ -259,152 +288,55 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }).toList();
   }
 
-  // --- Info Société (pour le PDF) ---
-  pw.Widget buildCompanyInfo(pw.Context context) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        // Simuler un logo (on utilise un texte coloré ici, car les images sont complexes sans asset)
-        pw.Text("LOGO", style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: PdfColors.red)),
-        pw.Text("Nom de votre société", style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-        pw.Text("Adresse: 123 Rue de l'Exemple", style: const pw.TextStyle(fontSize: 8)),
-        pw.Text("Tél: +243 000 000 000", style: const pw.TextStyle(fontSize: 8)),
-        pw.Text("Email: contact@votreentreprise.cd", style: const pw.TextStyle(fontSize: 8)),
-      ],
+  // --- MAPPING VERS LES MODÈLES PDF SIMPLIFIÉS ---
+  pdf_service.PdfClient _mapClient(Client appClient) {
+    return pdf_service.PdfClient(
+      nomClient: appClient.nomClient ?? 'Client Anonyme',
+      telephone: appClient.telephone,
+      adresse: appClient.adresse,
     );
   }
 
-
-  // --- Générer PDF (Intégration Logo + Mention Légale) ---
-  Future<pw.Document> generatePdf(Vente vente, List<LigneVente> lignes) async {
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a5, // Passage à un format A5 pour mieux intégrer les infos
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              // HEADER (Logo + Infos Facture)
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  buildCompanyInfo(context),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text("FACTURE N° ${vente.venteId}", style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.red700)),
-                      pw.SizedBox(height: 8),
-                      pw.Text("Date: ${vente.dateVente.substring(0, 10)}", style: const pw.TextStyle(fontSize: 10)),
-                    ],
-                  ),
-                ],
-              ),
-              pw.Divider(thickness: 1),
-
-              // Infos Client
-              pw.SizedBox(height: 10),
-              pw.Container(
-                padding: const pw.EdgeInsets.all(8),
-                decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey300), borderRadius: pw.BorderRadius.circular(4)),
-                child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text("Client: ${selectedClient?.nomClient ?? 'Anonyme'}", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                      if (selectedClient?.adresse != null && selectedClient!.adresse!.isNotEmpty) pw.Text("Adresse: ${selectedClient!.adresse!}"),
-                      if (selectedClient?.telephone != null && selectedClient!.telephone!.isNotEmpty) pw.Text("Tél: ${selectedClient!.telephone!}"),
-                    ]
-                ),
-              ),
-
-              pw.SizedBox(height: 15),
-
-              // Tableau des articles
-              pw.Table.fromTextArray(
-                border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
-                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey600),
-                cellStyle: const pw.TextStyle(fontSize: 9),
-                rowDecoration: const pw.BoxDecoration(color: PdfColors.white),
-                columnWidths: {
-                  0: const pw.FlexColumnWidth(3), // Produit
-                  1: const pw.FlexColumnWidth(1), // Prix
-                  2: const pw.FlexColumnWidth(1), // Quantité
-                  3: const pw.FlexColumnWidth(1.5), // Sous-total
-                },
-                headers: ["Désignation", "Prix Unitaire (FC)", "Qté", "Montant (FC)"],
-                data: lignes.map((c) => [
-                  c.nomProduit,
-                  c.prixVenteUnitaire.toStringAsFixed(0),
-                  c.quantite.toString(),
-                  c.sousTotal.toStringAsFixed(0),
-                ]).toList(),
-              ),
-              pw.SizedBox(height: 10),
-
-              // Totaux et Mentions
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  // Mention Légale
-                  pw.Container(
-                    width: PdfPageFormat.a5.width / 2.5,
-                    padding: const pw.EdgeInsets.all(5),
-                    decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.red, width: 0.5)),
-                    child: pw.Text(
-                        "ATTENTION: Toutes marchandises vendues et vérifiées ne peuvent plus être retournées ni échangées.",
-                        style: const pw.TextStyle(fontSize: 8, color: PdfColors.red800)
-                    ),
-                  ),
-
-                  // Totaux
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      _buildTotalLine("Total Brut:", vente.totalBrut, PdfColors.black),
-                      if (vente.reductionPercent > 0)
-                        _buildTotalLine("Réduction (0.2%):", vente.reductionPercent, PdfColors.red),
-                      pw.SizedBox(height: 5),
-                      pw.Container(
-                        padding: const pw.EdgeInsets.all(5),
-                        decoration: const pw.BoxDecoration(color: PdfColors.yellow200),
-                        child: _buildTotalLine("NET À PAYER:", vente.totalNet, PdfColors.black, isBold: true, size: 12),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-
-              pw.Spacer(),
-              pw.Center(child: pw.Text("Merci de votre confiance!",
-                  style:  pw.TextStyle(fontSize: 9,
-                      fontStyle: pw.FontStyle.italic))),
-            ],
-          );
-        },
-      ),
-    );
-    return pdf;
+  List<pdf_service.PdfLigneVente> _mapLignes(List<LigneVente> appLignes) {
+    return appLignes.map((l) => pdf_service.PdfLigneVente(
+      nomProduit: l.nomProduit,
+      prixVenteUnitaire: l.prixVenteUnitaire,
+      quantite: l.quantite,
+      sousTotal: l.sousTotal,
+    )).toList();
   }
 
-  // Fonction d'aide pour les lignes de totaux
-  pw.Widget _buildTotalLine(String label, double amount, PdfColor color, {bool isBold = false, double size = 9}) {
-    return pw.Row(
-      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-      children: [
-        pw.Text(label, style: pw.TextStyle(fontSize: size, color: color, fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-        pw.SizedBox(width: 5),
-        pw.Text("${amount.toStringAsFixed(0)} FC", style: pw.TextStyle(fontSize: size, color: color, fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-      ],
+  pdf_service.PdfVente _mapVente(Vente appVente) {
+    return pdf_service.PdfVente(
+      venteId: appVente.venteId,
+      dateVente: appVente.dateVente,
+      vendeurNom: appVente.vendeurNom ?? '---',
+      modePaiement: _modePaiement, // Utilisation du mode de paiement sélectionné
+      totalBrut: appVente.totalBrut,
+      montantReduction: appVente.reductionPercent,
+      totalNet: appVente.totalNet,
     );
   }
 
+  // --- Générer PDF (Utilise le service externe) ---
+  Future<Uint8List> _generatePdfBytes(Vente vente, List<LigneVente> lignes, Client client, bool isThermal) async {
+    final pdfClient = _mapClient(client);
+    final pdfVente = _mapVente(vente);
+    final pdfLignes = _mapLignes(lignes);
 
-  // --- Sauvegarde PDF (Archivage, Reste inchangé) ---
-  Future<void> savePdfLocally(pw.Document pdf, String fileName) async {
+    if (isThermal) {
+      final doc = await pdf_service.generateThermalReceipt(pdfVente, pdfLignes, pdfClient);
+      return doc.save();
+    } else {
+      final doc = await pdf_service.generatePdfA4(pdfVente, pdfLignes, pdfClient);
+      return doc.save();
+    }
+  }
+
+
+  // --- Sauvegarde PDF (Archivage) ---
+  Future<void> savePdfLocally(Uint8List bytes, String fileName) async {
     try {
-      final bytes = await pdf.save();
       final directory = await getApplicationDocumentsDirectory();
       // Utiliser un sous-répertoire pour l'archivage
       final archiveDir = Directory('${directory.path}/factures_archive');
@@ -429,29 +361,36 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }
   }
 
-  // ⚙️ NOUVELLE FONCTION: Prévisualisation du PDF
-  void _previewPdf(Vente vente, List<LigneVente> lignes) {
+  // ⚙️ NOUVELLE FONCTION: Prévisualisation du PDF A4 et Thermal
+  void _previewPdf(Vente vente, List<LigneVente> lignes, Client client) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PdfPreviewPage(
           title: 'Facture N° ${vente.venteId}',
-          generatePdf: (format) => generatePdf(vente, lignes).then((doc) => doc.save()),
+          // Fonction qui appelle notre service en fonction du type de reçu demandé
+          generatePdfBytes: (isThermal) => _generatePdfBytes(vente, lignes, client, isThermal),
         ),
       ),
     );
   }
 
-  // ⚙️ FONCTION: Impression Directe
-  Future<void> printOrPreviewPdf(pw.Document pdf, String venteId, {bool isPrinting = false}) async {
+  // ⚙️ FONCTION: Impression Directe (pour le thermal)
+  Future<void> printOrPreviewThermalPdf(Vente vente, List<LigneVente> lignes, Client client) async {
     try {
-      if (isPrinting) {
-        await Printing.layoutPdf(
-          name: 'Reçu Vente N° $venteId',
-          onLayout: (PdfPageFormat format) async => pdf.save(),
-        );
-        print('Facture N° $venteId envoyée à l\'imprimante.');
-      }
+      // 1. Générer le document thermique (isThermal=true)
+      final pdfBytes = await _generatePdfBytes(vente, lignes, client, true);
+
+      // 2. Définir le format thermique 80mm
+      const thermalFormat = PdfPageFormat(226, double.infinity, marginAll: 5);
+
+      // 3. Imprimer directement sur ce format
+      await Printing.layoutPdf(
+        name: 'Facture N° ${vente.venteId}',
+        format: thermalFormat, // Important: spécifier le format ici
+        onLayout: (PdfPageFormat format) async => pdfBytes,
+      );
+      print('Facture N° ${vente.venteId} envoyée à l\'imprimante thermique.');
     } catch (e) {
       print('Erreur d\'impression: $e');
       if (mounted) {
@@ -462,7 +401,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }
   }
 
-  // --- Valider vente (le chef d'orchestre, Mise à jour pour impression) ---
+  // --- Valider vente (le chef d'orchestre) ---
   Future<void> validateSale() async {
     if (selectedClient == null || cart.isEmpty) {
       if (mounted) {
@@ -473,7 +412,9 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
       return;
     }
 
-    // Vérification des stocks
+    final client = selectedClient!;
+
+    // ⚙️ Vérification des stocks : SÉCURITÉ
     for (var item in cart) {
       final stockDispo = item.produit.quantiteActuelle ?? 0;
       if (item.quantity > stockDispo) {
@@ -482,7 +423,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
             SnackBar(content: Text("Stock insuffisant pour ${item.produit.nom}. Stock disponible: $stockDispo")),
           );
         }
-        return; // Stop validation
+        return;
       }
     }
 
@@ -491,44 +432,52 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     final lignes = createLignes(vente);
 
     // 1. Insertion en BDD (qui inclut la déduction de stock)
-    // Nous récupérons l'ID de la vente après l'insertion pour s'assurer que les lignes y sont liées correctement.
     await db.insertVenteTransaction(vente: vente, lignesVente: lignes);
 
     // 2. Mettre à jour le compteur après une insertion réussie
     await _loadSalesCounter();
 
     // 3. Génération et impression
-    final pdf = await generatePdf(vente, lignes);
-    await savePdfLocally(pdf, 'facture_${vente.venteId}');
-    await printOrPreviewPdf(pdf, vente.venteId, isPrinting: true);
+    // On génère la version A4 pour l'archivage local
+    final pdfA4Bytes = await _generatePdfBytes(vente, lignes, client, false);
+    await savePdfLocally(pdfA4Bytes, 'facture_${vente.venteId}');
+
+    // On imprime la version THERMIQUE stabilisée
+    await printOrPreviewThermalPdf(vente, lignes, client);
+
 
     // 4. Réinitialisation
     if (mounted) {
       setState(() {
         cart.clear();
         selectedClient = null;
-        // On s'assure de masquer les suggestions après la vente
         _showClientSuggestions = false;
         _showProductSuggestions = false;
         clientSearchController.clear();
         productSearchController.clear();
       });
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Vente validée et imprimée !")));
+          const SnackBar(content: Text("Vente validée et Reçu Thermique imprimé !")));
     }
   }
 
 
-  // --- Widgets d'aide (Reste inchangé) ---
+  // --- Widgets d'aide ---
   Widget _buildClientSuggestions(double maxHeight) {
     if (!_showClientSuggestions || filteredClients.isEmpty) {
       return const SizedBox.shrink();
     }
     final height = filteredClients.length > 6 ? maxHeight : filteredClients.length * 56.0;
+    // On conserve la structure de la suggestion pour qu'elle soit superposée et nette
     return Container(
       constraints: BoxConstraints(maxHeight: height),
       margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.03), blurRadius: 8)]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.blueGrey.shade200), // Bordure plus douce
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.1), blurRadius: 10)], // Ombre plus prononcée pour l'effet "flottant"
+      ),
       child: ListView.separated(
         shrinkWrap: true,
         itemCount: filteredClients.length,
@@ -553,6 +502,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   Widget _buildProductSuggestions(double maxHeight) {
+    // Similaire au widget client
     if (!_showProductSuggestions || filteredProducts.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -560,17 +510,23 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     return Container(
       constraints: BoxConstraints(maxHeight: height),
       margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.03), blurRadius: 8)]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.blueGrey.shade200),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.1), blurRadius: 10)],
+      ),
       child: ListView.separated(
         shrinkWrap: true,
         itemCount: filteredProducts.length,
         separatorBuilder: (_, __) => const Divider(height: 1, indent: 8, endIndent: 8),
         itemBuilder: (context, idx) {
           final p = filteredProducts[idx];
-          // Vérification du stock pour l'affichage
-          final stockColor = (p.quantiteActuelle ?? 0) <= 0 ? Colors.red : ((p.quantiteActuelle ?? 0) < 5 ? Colors.orange : Colors.green);
-          final stockText = (p.quantiteActuelle ?? 0) <= 0 ? 'RUPTURE' : 'Stock: ${p.quantiteActuelle}';
-          final isOutOfStock = (p.quantiteActuelle ?? 0) <= 0;
+          // Vérification du stock pour l'affichage (alerte orange si stock < 5, même si vente autorisée)
+          final stockDispo = p.quantiteActuelle ?? 0;
+          final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
+          final stockText = stockDispo <= 0 ? 'RUPTURE' : 'Stock: $stockDispo';
+          final isOutOfStock = stockDispo <= 0;
 
           return ListTile(
             leading: p.imagePath != null && p.imagePath!.isNotEmpty ? SizedBox(width: 40, height: 40, child: Image.network(p.imagePath!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image))) : const Icon(Icons.inventory_2),
@@ -586,35 +542,173 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
       ),
     );
   }
+
+  // WIDGET: envelopper les sections dans des Cartes
+  Widget _buildSectionCard({required String title, required Widget content, EdgeInsets? padding, Color? color}) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      // Retiré la marge du bas ici pour mieux gérer l'espacement dans la Row
+      margin: const EdgeInsets.all(0),
+      child: Padding(
+        padding: padding ?? const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+                color: color ?? Colors.blueGrey.shade700,
+              ),
+            ),
+            const Divider(height: 20, color: Colors.blueGrey),
+            content,
+          ],
+        ),
+      ),
+    );
+  }
+
+  // WIDGET: afficher les totaux
+  Widget _buildTotalsDisplay(Vente? vente) {
+    if (vente == null) {
+      return const Center(child: Text("Ajouter des articles pour voir les totaux.", style: TextStyle(fontSize: 16, color: Colors.grey)));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        // Total Brut
+        _buildTotalLine("Total Brut", total, Colors.blueGrey.shade700, false),
+        // Réduction
+        _buildTotalLine("Réduction (6%)", vente.reductionPercent, Colors.red, false),
+        const Divider(color: Colors.black, thickness: 1.5, height: 10),
+        // Total Net
+        _buildTotalLine("TOTAL À PAYER", vente.totalNet, Colors.green.shade700, true),
+      ],
+    );
+  }
+
+  // Widget utilitaire pour une ligne de total
+  Widget _buildTotalLine(String label, double amount, Color color, bool isBig) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Text(
+            '$label :',
+            style: TextStyle(
+              fontSize: isBig ? 20 : 16,
+              fontWeight: isBig ? FontWeight.bold : FontWeight.normal,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '${amount.toStringAsFixed(0)} FC',
+            style: TextStyle(
+              fontSize: isBig ? 22 : 16,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // WIDGET pour les boutons de validation (ancre fixe)
+  Widget _buildValidationButtons(bool canValidate, Vente? vente, List<LigneVente>? lignes, Client? client) {
+    return Container(
+      // Zone fixe en bas de l'écran, avec une ombre pour la surélever
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 15,
+            offset: const Offset(0, -5), // Ombre vers le haut
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.only(top: 15, bottom: 25, left: 16, right: 16),
+      width: double.infinity,
+      child: SafeArea( // S'assure de ne pas chevaucher les barres de navigation du système
+        child: Center(
+          child: ConstrainedBox( // Limite la largeur des boutons sur grand écran
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Bouton 1: Aperçu A4
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.print),
+                    label: const Text("Aperçu Facture", overflow: TextOverflow.ellipsis),
+                    onPressed: canValidate ? () => _previewPdf(vente!, lignes!, client!) : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
+                      textStyle: const TextStyle(fontSize: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // Bouton 2: Valider et Imprimer (Action Principale)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text("VALIDER ET IMPRIMER LA VENTE", overflow: TextOverflow.ellipsis),
+                    onPressed: canValidate ? validateSale : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
+                      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final containerWidth = screenWidth > 650 ? 650.0 : screenWidth * 0.9;
-    final suggestionMaxHeight = 300.0;
+    // On augmente un peu la taille du container pour mieux profiter de l'écran
+    final containerWidth = screenWidth > 900 ? 900.0 : screenWidth * 0.95;
+    final suggestionMaxHeight = 350.0;
 
     // Détermination de l'état de validation
     final canValidate = selectedClient != null && cart.isNotEmpty;
     final tempVente = canValidate ? createVente(isDraft: true) : null;
     final tempLignes = canValidate ? createLignes(tempVente!) : null;
+    final client = selectedClient;
+
+    // Hauteur estimée de la barre d'actions fixes + padding
+    const double fixedButtonHeight = 110.0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Nouvelle Vente"),
         centerTitle: true,
-        backgroundColor: Colors.grey,
+        backgroundColor: Colors.blueGrey,
+        foregroundColor: Colors.white,
+        elevation: 4,
         actions: [
-          // Option d'archivage PDF
           IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            onPressed: canValidate ? () async {
-              final pdf = await generatePdf(tempVente!, tempLignes!);
-              await savePdfLocally(pdf, 'preview_${tempVente.venteId}');
-            } : null,
-            tooltip: "Archiver PDF (Prévisualisation)",
-          ),
-          // Navigation vers l'historique
-          IconButton(
-            icon: const Icon(Icons.history),
+            icon: const Icon(Icons.history, color: Colors.white),
             onPressed: () {
               Navigator.push(
                 context,
@@ -625,225 +719,323 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
           ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return Column(
-            children: [
-              Expanded(
+      body: Container(
+        color: Colors.blueGrey.shade50,
+        child: Stack(
+          children: [
+            // 1. Contenu défilant
+            Positioned.fill(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, fixedButtonHeight),
                 child: Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(16),
-                    child: Container(
-                      width: containerWidth,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // CLIENT SEARCH
-                          const Text('Client', style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: clientSearchController,
-                            decoration: InputDecoration(
-                              prefixIcon: const Icon(Icons.search),
-                              hintText: selectedClient == null ? 'Rechercher un client (nom ou téléphone)' : selectedClient!.nomClient,
-                              border: const OutlineInputBorder(),
-                              suffixIcon: selectedClient != null ? IconButton(
-                                icon: const Icon(Icons.clear, color: Colors.red),
-                                onPressed: () {
-                                  setState(() {
-                                    selectedClient = null;
-                                    clientSearchController.clear();
-                                    _showClientSuggestions = false;
-                                  });
-                                },
-                              ) : null,
-                            ),
-                            onChanged: filterClients,
-                            onTap: () {
-                              if (clientSearchController.text.isNotEmpty) setState(() => _showClientSuggestions = true);
-                            },
-                          ),
-                          // suggestions
-                          _buildClientSuggestions(suggestionMaxHeight),
-                          const SizedBox(height: 8),
+                  child: SizedBox(
+                    width: containerWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
 
-                          // NEW CLIENT FORM toggle
-                          TextButton.icon(
-                            icon: Icon(showNewClientForm ? Icons.close : Icons.person_add),
-                            label: Text(showNewClientForm ? "Annuler ajout" : "Nouveau client"),
-                            onPressed: () => setState(() => showNewClientForm = !showNewClientForm),
-                          ),
-                          if (showNewClientForm) ...[
-                            const SizedBox(height: 8),
-                            TextField(controller: nameController, decoration: const InputDecoration(labelText: "Nom du client", border: OutlineInputBorder())),
-                            const SizedBox(height: 8),
-                            TextField(controller: phoneController, decoration: const InputDecoration(labelText: "Téléphone", border: OutlineInputBorder()), keyboardType: TextInputType.phone),
-                            const SizedBox(height: 8),
-                            TextField(controller: addressController, decoration: const InputDecoration(labelText: "Adresse", border: OutlineInputBorder())),
-                            const SizedBox(height: 8),
-                            Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(icon: const Icon(Icons.check), label: const Text("Ajouter client"), onPressed: addClient)),
-                          ],
-
-                          const SizedBox(height: 16),
-
-                          // PRODUCT SEARCH
-                          const Text('Produit', style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: productSearchController,
-                                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Rechercher un produit (nom / catégorie)', border: OutlineInputBorder()),
-                                  onChanged: filterProducts,
+                        // 1. SECTION CLIENT
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10.0),
+                          child: _buildSectionCard(
+                            title: '1. Sélectionner ou ajouter un Client',
+                            content: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Champ de recherche Client
+                                TextField(
+                                  controller: clientSearchController,
+                                  decoration: InputDecoration(
+                                    prefixIcon: const Icon(Icons.search),
+                                    hintText: selectedClient == null ? 'Rechercher un client (nom ou téléphone)' : selectedClient!.nomClient,
+                                    border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                                    suffixIcon: selectedClient != null ? IconButton(
+                                      icon: const Icon(Icons.clear, color: Colors.red),
+                                      onPressed: () {
+                                        setState(() {
+                                          selectedClient = null;
+                                          clientSearchController.clear();
+                                          _showClientSuggestions = false;
+                                        });
+                                      },
+                                    ) : null,
+                                  ),
+                                  onChanged: filterClients,
                                   onTap: () {
-                                    if (productSearchController.text.isNotEmpty) setState(() => _showProductSuggestions = true);
+                                    if (clientSearchController.text.isNotEmpty) setState(() => _showClientSuggestions = true);
                                   },
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(icon: const Icon(Icons.qr_code_scanner), onPressed: () {/* TODO: scanner */}),
-                            ],
-                          ),
-                          _buildProductSuggestions(suggestionMaxHeight),
+                                // suggestions
+                                _buildClientSuggestions(suggestionMaxHeight),
+                                const SizedBox(height: 8),
 
-                          const SizedBox(height: 16),
+                                // NOUVEAU CLIENT toggle
+                                TextButton.icon(
+                                  icon: Icon(showNewClientForm ? Icons.close : Icons.person_add, color: Colors.blue),
+                                  label: Text(showNewClientForm ? "Annuler l'ajout d'un client" : "Ajouter un nouveau client", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+                                  onPressed: () => setState(() => showNewClientForm = !showNewClientForm),
+                                ),
 
-                          // PANIER
-                          const Text('Panier', style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text("Produit")),
-                                DataColumn(label: Text("Prix")),
-                                DataColumn(label: Text("Stock")), // Ajout de la colonne stock
-                                DataColumn(label: Text("Qté")),
-                                DataColumn(label: Text("S.total")),
-                                DataColumn(label: Text("Actions")),
-                              ],
-                              rows: cart.map((item) {
-                                final stockDispo = item.produit.quantiteActuelle ?? 0;
-                                final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
-                                return DataRow(cells: [
-                                  DataCell(Text(item.produit.nom ?? '')),
-                                  DataCell(Text("${item.produit.prix?.toStringAsFixed(0) ?? '0'} FC")),
-                                  DataCell(Text(stockDispo.toString(), style: TextStyle(color: stockColor, fontWeight: FontWeight.bold))),
-                                  DataCell(Text("${item.quantity}")),
-                                  DataCell(Text("${((item.produit.prix ?? 0) * item.quantity).toStringAsFixed(0)} FC")),
-                                  DataCell(Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // Bouton Moins
-                                      IconButton(
-                                        icon: const Icon(Icons.remove, size: 20),
-                                        onPressed: () => updateQuantity(item, -1),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                      // Bouton Plus (limité au stock disponible)
-                                      IconButton(
-                                        icon: const Icon(Icons.add, size: 20),
-                                        onPressed: item.quantity < stockDispo ? () => updateQuantity(item, 1) : null,
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                      // Bouton Supprimer
-                                      IconButton(
-                                        icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                        onPressed: () => setState(() => cart.remove(item)),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                      ),
-                                    ],
+                                if (showNewClientForm) ...[
+                                  const SizedBox(height: 12),
+                                  TextField(controller: nameController, decoration: InputDecoration(labelText: "Nom du client", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
+                                  const SizedBox(height: 8),
+                                  TextField(controller: phoneController, decoration: InputDecoration(labelText: "Téléphone", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))), keyboardType: TextInputType.phone),
+                                  const SizedBox(height: 8),
+                                  TextField(controller: addressController, decoration: InputDecoration(labelText: "Adresse", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
+                                  const SizedBox(height: 16),
+                                  Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(
+                                    icon: const Icon(Icons.check),
+                                    label: const Text("Ajouter client"),
+                                    onPressed: addClient,
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                                   )),
-                                ]);
-                              }).toList(),
+                                ],
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+
+                        // NOUVEAU BLOC: Sections 2 et 3 sur la même ligne (Row)
+                        // On n'applique pas de Row sur les petits écrans pour rester lisible (mobile-first)
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (constraints.maxWidth < 600) {
+                              // Affichage en colonne pour les petits écrans
+                              return Column(
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10.0),
+                                    child: _buildSectionCard(
+                                      title: '2. Mode de Paiement',
+                                      content: DropdownButtonFormField<String>(
+                                        value: _modePaiement,
+                                        items: ['CASH', 'TRANSFERT', 'CRÉDIT']
+                                            .map((label) => DropdownMenuItem(value: label, child: Text(label, style: const TextStyle(fontSize: 16))))
+                                            .toList(),
+                                        onChanged: (value) {
+                                          if (value != null) setState(() => _modePaiement = value);
+                                        },
+                                        decoration: const InputDecoration(
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                                          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 10.0),
+                                    child: _buildSectionCard(
+                                      title: '3. Sélectionner des produits',
+                                      content: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Expanded(
+                                                child: TextField(
+                                                  controller: productSearchController,
+                                                  decoration: InputDecoration(
+                                                      prefixIcon: const Icon(Icons.search),
+                                                      hintText: 'Rechercher un produit',
+                                                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)))
+                                                  ),
+                                                  onChanged: filterProducts,
+                                                  onTap: () {
+                                                    if (productSearchController.text.isNotEmpty) setState(() => _showProductSuggestions = true);
+                                                  },
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                decoration: BoxDecoration(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  color: Colors.blueGrey.shade100,
+                                                ),
+                                                child: IconButton(
+                                                  icon: Icon(Icons.qr_code_scanner, color: Colors.blueGrey.shade700),
+                                                  onPressed: () {/* TODO: scanner */},
+                                                  tooltip: "Scanner le code-barres",
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          _buildProductSuggestions(suggestionMaxHeight),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            } else {
+                              // Affichage en Row (Ligne) pour les grands écrans
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10.0),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 2. SECTION PAIEMENT (Expanded pour prendre 50% de l'espace)
+                                    Expanded(
+                                      child: _buildSectionCard(
+                                        title: '2. Mode de Paiement',
+                                        content: DropdownButtonFormField<String>(
+                                          value: _modePaiement,
+                                          items: ['CASH', 'TRANSFERT', 'CRÉDIT']
+                                              .map((label) => DropdownMenuItem(value: label, child: Text(label, style: const TextStyle(fontSize: 16))))
+                                              .toList(),
+                                          onChanged: (value) {
+                                            if (value != null) setState(() => _modePaiement = value);
+                                          },
+                                          decoration: const InputDecoration(
+                                            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 15), // Espace entre les deux cartes
+
+                                    // 3. SECTION PRODUIT (Expanded pour prendre 50% de l'espace)
+                                    Expanded(
+                                      child: _buildSectionCard(
+                                        title: '3. Sélectionner des produits',
+                                        content: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: TextField(
+                                                    controller: productSearchController,
+                                                    decoration: InputDecoration(
+                                                        prefixIcon: const Icon(Icons.search),
+                                                        hintText: 'Rechercher un produit',
+                                                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)))
+                                                    ),
+                                                    onChanged: filterProducts,
+                                                    onTap: () {
+                                                      if (productSearchController.text.isNotEmpty) setState(() => _showProductSuggestions = true);
+                                                    },
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  decoration: BoxDecoration(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    color: Colors.blueGrey.shade100,
+                                                  ),
+                                                  child: IconButton(
+                                                    icon: Icon(Icons.qr_code_scanner, color: Colors.blueGrey.shade700),
+                                                    onPressed: () {/* TODO: scanner */},
+                                                    tooltip: "Scanner le code-barres",
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            // La suggestion doit rester visible même si elle est dans une carte
+                                            _buildProductSuggestions(suggestionMaxHeight),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          },
+                        ),
+
+                        // 4. SECTION PANIER et TOTAUX
+                        _buildSectionCard(
+                          title: '4. Panier et Totaux',
+                          content: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // PANIER TABLEAU
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: DataTable(
+                                  columnSpacing: 18,
+                                  headingRowColor: MaterialStateProperty.all(Colors.blueGrey.shade50),
+                                  columns: const [
+                                    DataColumn(label: Text("Produit", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("Prix", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("Stock", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("Qté", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("S.total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("Actions", style: TextStyle(fontWeight: FontWeight.bold))),
+                                  ],
+                                  rows: cart.map((item) {
+                                    final stockDispo = item.produit.quantiteActuelle ?? 0;
+                                    final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
+                                    return DataRow(cells: [
+                                      DataCell(Text(item.produit.nom ?? '', style: const TextStyle(fontWeight: FontWeight.w500))),
+                                      DataCell(Text("${item.produit.prix?.toStringAsFixed(0) ?? '0'} F")),
+                                      DataCell(Text(stockDispo.toString(), style: TextStyle(color: stockColor, fontWeight: FontWeight.bold))),
+                                      DataCell(Text("${item.quantity}")),
+                                      DataCell(Text("${((item.produit.prix ?? 0) * item.quantity).toStringAsFixed(0)} F", style: const TextStyle(fontWeight: FontWeight.bold))),
+                                      DataCell(Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Boutons d'ajustement de quantité
+                                          SizedBox(
+                                            width: 32, height: 32,
+                                            child: IconButton(
+                                              icon: const Icon(Icons.remove, size: 18),
+                                              onPressed: () => updateQuantity(item, -1),
+                                            ),
+                                          ),
+                                          // Bouton d'ajout (avec vérification stock pour +1)
+                                          SizedBox(
+                                            width: 32, height: 32,
+                                            child: IconButton(
+                                              icon: const Icon(Icons.add, size: 18),
+                                              // Autoriser l'ajout tant que la quantité actuelle est strictement inférieure au stock disponible
+                                              onPressed: item.quantity < stockDispo ? () => updateQuantity(item, 1) : null,
+                                              color: item.quantity < stockDispo ? Colors.green : Colors.grey,
+                                            ),
+                                          ),
+                                          // Bouton Supprimer Ligne
+                                          SizedBox(
+                                            width: 32, height: 32,
+                                            child: IconButton(
+                                              icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                                              onPressed: () => updateQuantity(item, -item.quantity),
+                                            ),
+                                          ),
+                                        ],
+                                      )),
+                                    ]);
+                                  }).toList(),
+                                ),
+                              ),
+                              // --- FIN PANIER TABLEAU ---
+                              const SizedBox(height: 15),
+                              // RAPPEL TOTAUX
+                              _buildTotalsDisplay(tempVente),
+                            ],
+                          ),
+                        ),
+
+                        // Espaceur final
+                        const SizedBox(height: 10),
+
+                      ],
                     ),
                   ),
                 ),
               ),
+            ),
 
-              // Totaux & validation
-              Container(
-                width: containerWidth,
-                padding: const EdgeInsets.all(16),
-                color: Colors.grey[200],
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text("Total Brut: ${total.toStringAsFixed(0)} FC", textAlign: TextAlign.right),
-                    Text("Réduction (0.2%): ${discount.toStringAsFixed(0)} FC", textAlign: TextAlign.right, style: const TextStyle(color: Colors.red)),
-                    Text("Net à payer: ${netToPay.toStringAsFixed(0)} FC", textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.green)),
-                    const SizedBox(height: 12),
-                    // Ligne des actions
-                    Row(
-                      children: [
-                        // Prévisualisation PDF
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.visibility),
-                            label: const Text("Prévisualiser"),
-                            onPressed: canValidate ? () => _previewPdf(tempVente!, tempLignes!) : null,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        // Validation & Impression
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.print),
-                            label: const Text("Valider et Imprimer"),
-                            onPressed: canValidate ? validateSale : null,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: canValidate ? Colors.blue : Colors.grey,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// NOUVELLE PAGE POUR AFFICHER LA PRÉVISUALISATION PDF
-class PdfPreviewPage extends StatelessWidget {
-  const PdfPreviewPage({
-    super.key,
-    required this.title,
-    required this.generatePdf,
-  });
-
-  final String title;
-  final Future<Uint8List> Function(PdfPageFormat format) generatePdf;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        backgroundColor: Colors.blue,
-      ),
-      body: PdfPreview(
-        build: generatePdf,
-        allowPrinting: true, // Permet l'impression depuis la prévisualisation
-        allowSharing: true,  // Permet le partage/l'export
-        maxPageWidth: 700,
-        canChangePageFormat: false,
-        canChangeOrientation: false,
-        pdfFileName: title.replaceAll(' ', '_') + '.pdf',
+            // 2. Barre d'actions fixe (Positionnée en bas)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildValidationButtons(canValidate, tempVente, tempLignes, client),
+            ),
+          ],
+        ),
       ),
     );
   }
