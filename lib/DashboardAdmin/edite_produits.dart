@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_produits.dart';
+import 'package:factura/Modeles/model_produits.dart';
 
 class AdminEditeProduits extends StatefulWidget {
   final Produit produit;

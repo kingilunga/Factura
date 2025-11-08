@@ -1,5 +1,5 @@
-import 'package:factura/database/model_clients.dart';
-import 'package:factura/database/model_produits.dart';
+import 'package:factura/Modeles/model_clients.dart';
+import 'package:factura/Modeles/model_produits.dart';
 
 class CartItem {
   final Produit produit;

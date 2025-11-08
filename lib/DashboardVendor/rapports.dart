@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_ventes.dart';
+import 'package:factura/Modeles/model_ventes.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 

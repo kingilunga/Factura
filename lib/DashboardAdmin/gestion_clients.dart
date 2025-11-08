@@ -1,6 +1,6 @@
+import 'package:factura/Modeles/model_clients.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_clients.dart';
 // Imports nécessaires pour la génération et l'impression PDF
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;

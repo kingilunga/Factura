@@ -1,8 +1,8 @@
+import 'package:factura/Modeles/model_clients.dart';
+import 'package:factura/Modeles/model_produits.dart';
+import 'package:factura/Modeles/model_ventes.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_produits.dart';
-import 'package:factura/database/model_clients.dart';
-import 'package:factura/database/model_ventes.dart';
 
 class RapportsPage extends StatefulWidget {
   final String typeDocument; // ex: "Facture", "Clients", "Produits", "Clients Performants"

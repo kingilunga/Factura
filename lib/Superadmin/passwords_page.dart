@@ -1,6 +1,7 @@
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'dart:math';
 
 class PasswordsPage extends StatefulWidget {

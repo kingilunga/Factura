@@ -2,14 +2,15 @@
 // Service SQLite complet pour Factura Vision (Desktop/Web)
 
 import 'dart:io';
-import 'package:factura/database/models_utilisateurs.dart';
-import 'package:factura/database/model_produits.dart';
-import 'package:factura/database/model_clients.dart';
-import 'package:factura/database/model_fournisseurs.dart';
-import 'package:factura/database/model_ventes.dart';
+import 'package:factura/Modeles/model_clients.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:factura/Modeles/model_produits.dart';
+import 'package:factura/Modeles/model_fournisseurs.dart';
+import 'package:factura/Modeles/model_ventes.dart';
+import 'package:factura/Modeles/model_taux_change.dart';
 
 // ======================================================================
 // --- MODÈLES D'APERÇU SIMPLIFIÉS POUR LE TABLEAU DE BORD ---

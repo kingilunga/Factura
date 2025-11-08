@@ -7,7 +7,7 @@ import 'package:factura/DashboardVendor/ventes.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/DashboardAdmin/rapports_page.dart';
 import 'package:factura/Splash_login/connexion.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:factura/DashboardVendor/rapports.dart';
 
 // Import des vues spécifiques au Vendeur

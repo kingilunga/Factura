@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:factura/DashboardAdmin/ajout_utilisateurs.dart';
 import 'package:factura/DashboardAdmin/edite_utilisateurs.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 
 class GestionUtilisateurs extends StatefulWidget {
   final Utilisateur currentUser; // rôle de l'utilisateur connecté
@@ -33,7 +33,7 @@ class _GestionUtilisateursState extends State<GestionUtilisateurs> {
 
       if (widget.currentUser.role == 'superadmin') {
         // SuperAdmin voit tout
-        filteredUsers = allUsers;
+        filteredUsers = allUsers.cast<Utilisateur>();
       } else if (widget.currentUser.role == 'admin') {
         // Admin voit lui-même et les vendeurs
         filteredUsers = allUsers.where((u) {
@@ -41,10 +41,10 @@ class _GestionUtilisateursState extends State<GestionUtilisateurs> {
           final isSelf = (u.localId != null && u.localId == widget.currentUser.localId)
               || u.email == widget.currentUser.email;
           return isVendeur || isSelf;
-        }).toList();
+        }).cast<Utilisateur>().toList();
       } else {
         // Vendeur voit seulement lui-même
-        filteredUsers = allUsers.where((u) => u.email == widget.currentUser.email).toList();
+        filteredUsers = allUsers.where((u) => u.email == widget.currentUser.email).cast<Utilisateur>().toList();
       }
 
       setState(() {
@@ -160,7 +160,7 @@ class _GestionUtilisateursState extends State<GestionUtilisateurs> {
                     ? user.prenom![0].toUpperCase()
                     : '?';
                 final String fullName =
-                    '${user.nom ?? ''} ${user.postNom ?? ''} ${user.prenom ?? ''}';
+                    '${user.nom ?? ''} ${user.postnom ?? ''} ${user.prenom ?? ''}';
                 final String subtitle =
                     '${user.email ?? 'Email manquant'} - Rôle: ${user.role}';
 

@@ -6,9 +6,9 @@ import 'package:factura/DashboardAdmin/gestion_utilisateurs.dart';
 import 'package:factura/DashboardAdmin/gestion_produits.dart';
 import 'package:factura/DashboardAdmin/paramettres.dart';
 import 'package:factura/DashboardAdmin/rapports_page.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/Splash_login/connexion.dart';
-import 'package:factura/database/models_utilisateurs.dart';
 // Import du service et des modèles pour le tableau de bord
 import 'package:factura/database/database_service.dart';
 import 'package:http/http.dart' as http;
@@ -81,7 +81,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   Widget _buildDrawer(BuildContext context) {
     final String fullName =
-        '${widget.user.prenom ?? ''}${(widget.user.postNom != null && widget.user.postNom!.isNotEmpty) ? ' ${widget.user.postNom!}' : ''} ${widget.user.nom ?? ''}';
+        '${widget.user.prenom ?? ''}${(widget.user.postnom != null && widget.user.postnom!.isNotEmpty) ? ' ${widget.user.postnom!}' : ''} ${widget.user.nom ?? ''}';
 
     return Container(
       width: 250,

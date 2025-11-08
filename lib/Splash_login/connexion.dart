@@ -2,7 +2,7 @@ import 'package:factura/DashboardVendor/vendeurs_dashboard.dart';
 import 'package:factura/Superadmin/SuperAdminDashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:factura/DashboardAdmin/admin_dashboard.dart';
 
 class ConnexionPage extends StatefulWidget {
@@ -209,7 +209,7 @@ class _ConnexionPageState extends State<ConnexionPage> {
                         const SizedBox(height: 20),
 
                         // --- BOUTONS DE TEST RAPIDE (Conservés) ---
-                        /*Row(
+    Row(
                           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                           children: [
                             ElevatedButton(
@@ -218,10 +218,12 @@ class _ConnexionPageState extends State<ConnexionPage> {
                                   nom: 'Root',
                                   prenom: 'SuperAdmin',
                                   email: 'root@factura.com',
-                                  motDePasseHash: '',
+                                  motDePasse: '',
                                   role: 'superadmin',
-                                  nomUtilisateur: '', // Conserve cette ligne
-                                  syncStatus: '',
+                                  postnom: '',
+                                  telephone: '',
+                                  //nomUtilisateur: '', // Conserve cette ligne
+                                  //syncStatus: '',
                                 );
                                 Navigator.pushReplacement(
                                   context,
@@ -240,10 +242,10 @@ class _ConnexionPageState extends State<ConnexionPage> {
                                   nom: 'Admin',
                                   prenom: 'Super',
                                   email: 'admin@factura.com',
-                                  motDePasseHash: '',
-                                  role: 'admin',
-                                  nomUtilisateur: '', // Conserve cette ligne
-                                  syncStatus: '',
+                                  motDePasse: '',
+                                  role: 'admin', postnom: '', telephone: '',
+                                  //nomUtilisateur: '', // Conserve cette ligne
+                                  //syncStatus: '',
                                 );
                                 Navigator.pushReplacement(
                                   context,
@@ -262,10 +264,10 @@ class _ConnexionPageState extends State<ConnexionPage> {
                                   nom: 'Vendeur',
                                   prenom: 'Jean',
                                   email: 'vendeur@factura.com',
-                                  motDePasseHash: '',
-                                  role: 'vendeur',
-                                  nomUtilisateur: '', // Conserve cette ligne
-                                  syncStatus: '',
+                                  motDePasse: '',
+                                  role: 'vendeur', postnom: '', telephone: '',
+                                  //nomUtilisateur: '', // Conserve cette ligne
+                                  //syncStatus: '',
                                 );
                                 Navigator.pushReplacement(
                                   context,
@@ -279,7 +281,7 @@ class _ConnexionPageState extends State<ConnexionPage> {
                               child: const Text( 'Vendeur'),
                             ),
                           ],
-                        ),*/
+                        ),
                         const SizedBox(height: 10),
                         TextButton(
                           onPressed: () {

@@ -1,4 +1,4 @@
-import 'package:factura/database/model_fournisseurs.dart';
+import 'package:factura/Modeles/model_fournisseurs.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
 

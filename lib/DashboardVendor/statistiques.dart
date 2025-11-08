@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart'; // Import pour la DB
-import 'package:factura/database/model_ventes.dart'; // Supposé exister
+import 'package:factura/Modeles/model_ventes.dart'; // Supposé exister
 import 'package:intl/intl.dart';
 import 'package:flutter/foundation.dart';
 // Note: J'ai retiré l'import de 'package:factura/api_calls.dart'; car on utilise la DB.

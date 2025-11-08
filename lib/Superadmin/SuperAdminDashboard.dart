@@ -6,7 +6,7 @@ import 'package:factura/Superadmin/passwords_page.dart';
 import 'package:factura/Superadmin/settings_page.dart';
 import 'package:factura/Superadmin/users_page.dart';
 import 'package:flutter/material.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 
 // --- CONSTANTES DE STYLE ADMIN ---
 const Color kPrimaryColor = Color(0xFF1565C0); // Bleu foncé pour un look professionnel

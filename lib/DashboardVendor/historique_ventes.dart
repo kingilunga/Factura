@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_ventes.dart';
-import 'package:factura/database/model_clients.dart';
+import 'package:factura/Modeles/model_ventes.dart';
+import 'package:factura/Modeles/model_clients.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:path_provider/path_provider.dart';

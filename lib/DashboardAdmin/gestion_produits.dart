@@ -2,7 +2,7 @@ import 'package:factura/DashboardAdmin/ajout_produits.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/DashboardVendor/edite_produits_page.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/model_produits.dart';
+import 'package:factura/Modeles/model_produits.dart';
 
 class GestionProduits extends StatefulWidget {
   const GestionProduits({super.key});

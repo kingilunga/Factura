@@ -1,6 +1,6 @@
+import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
 
 class EditeUtilisateurs extends StatefulWidget {
   final Utilisateur utilisateur;
@@ -27,11 +27,11 @@ class _EditeUtilisateursState extends State<EditeUtilisateurs> {
 
     // Initialiser les champs avec les valeurs existantes
     _nomController = TextEditingController(text: widget.utilisateur.nom ?? '');
-    _postNomController = TextEditingController(text: widget.utilisateur.postNom ?? '');
+    _postNomController = TextEditingController(text: widget.utilisateur.postnom ?? '');
     _prenomController = TextEditingController(text: widget.utilisateur.prenom ?? '');
     _telephoneController = TextEditingController(text: widget.utilisateur.telephone ?? '');
     _emailController = TextEditingController(text: widget.utilisateur.email ?? '');
-    _passwordController = TextEditingController(text: widget.utilisateur.motDePasseHash ?? '');
+    _passwordController = TextEditingController(text: widget.utilisateur.motDePasse ?? '');
     _selectedRole = widget.utilisateur.role;
   }
 
@@ -51,15 +51,12 @@ class _EditeUtilisateursState extends State<EditeUtilisateurs> {
       final updatedUser = Utilisateur(
         localId: widget.utilisateur.localId,
         nom: _nomController.text,
-        postNom: _postNomController.text,
+        postnom: _postNomController.text,
         prenom: _prenomController.text,
         telephone: _telephoneController.text,
         email: _emailController.text,
-        motDePasseHash: _passwordController.text,
+        motDePasse: _passwordController.text,
         role: _selectedRole,
-        nomUtilisateur: '',
-        nomUtil: '',
-        nomUtilisateurisateur: '',
       );
 
       // ✅ Utiliser le singleton DatabaseService

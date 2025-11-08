@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 
 class AjoutUtilisateurs extends StatefulWidget {
   const AjoutUtilisateurs({super.key, Str, String? defaultRole});
@@ -34,15 +34,12 @@ class _AjoutUtilisateursState extends State<AjoutUtilisateurs> {
     if (_formKey.currentState!.validate()) {
       final newUser = Utilisateur(
         nom: _nomController.text,
-        postNom: _postNomController.text,
+        postnom: _postNomController.text,
         prenom: _prenomController.text,
         telephone: _telephoneController.text,
         email: _emailController.text,
-        motDePasseHash: _passwordController.text,
+        motDePasse: _passwordController.text,
         role: _selectedRole,
-        nomUtilisateur: '',
-        nomUtil: '',
-        nomUtilisateurisateur: '',
       );
 
       // ✅ Utilisation du singleton

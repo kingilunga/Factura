@@ -2,7 +2,7 @@ import 'package:factura/Superadmin/superadmin_edite_users.dart';
 import 'package:factura/Superadmin/superadmin_users_add.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/database/models_utilisateurs.dart';
+import 'package:factura/Modeles/model_utilisateurs.dart';
 
 
 class SuperadminUsersPage extends StatefulWidget {
@@ -139,7 +139,7 @@ class _SuperadminUsersPageState extends State<SuperadminUsersPage> {
                     ? user.prenom![0].toUpperCase()
                     : '?';
                 final fullName =
-                    '${user.nom ?? ''} ${user.postNom ?? ''} ${user.prenom ?? ''}';
+                    '${user.nom ?? ''} ${user.postnom ?? ''} ${user.prenom ?? ''}';
                 final subtitle = '${user.email ?? 'Email manquant'} - Rôle: ${user.role}';
 
                 return Card(
