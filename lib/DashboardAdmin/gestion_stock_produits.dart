@@ -1,18 +1,21 @@
+import 'package:factura/DashboardAdmin/ajout_produits.dart';
+import 'package:factura/service_pdf.dart';
 import 'package:flutter/material.dart';
+import 'package:factura/DashboardVendor/edite_produits_page.dart';
 import 'package:factura/database/database_service.dart';
 import 'package:factura/Modeles/model_produits.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:printing/printing.dart';
 
-// NOTE: Les imports de service_pdf et printing sont retirés car le Vendeur n'imprime/exporte pas l'inventaire complet.
-
-class GestionStockProduitsVendor extends StatefulWidget {
-  const GestionStockProduitsVendor({super.key});
+class GestionStockProduits extends StatefulWidget {
+  const GestionStockProduits({super.key});
 
   @override
-  State<GestionStockProduitsVendor> createState() => _GestionStockProduitsVendorState();
+  State<GestionStockProduits> createState() => _GestionStockProduitsState();
 }
 
-class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor> {
+class _GestionStockProduitsState extends State<GestionStockProduits> {
   final DatabaseService _dbService = DatabaseService.instance;
   List<Produit> _produits = [];
   List<Produit> _filteredProduits = [];
@@ -85,51 +88,146 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
     });
   }
 
-  // NOTE : Pour l'instant, cette fonction ne fait rien car la navigation vers AjoutProduits
-  // n'est pas adaptée pour le Vendeur, mais elle est conservée pour le bouton.
-  void _navigateToAddProduit() {
-    // Action future : Naviguer vers un formulaire d'enregistrement de mouvement de stock
-    // Temporairement, nous affichons juste un message.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Fonctionnalité d'ajout de stock à développer pour le Vendeur.")),
-    );
-  }
-
-  // --- LOGIQUE DE CALCUL DES TOTAUX Vendeur (Simplifiée) ---
+  // --- LOGIQUE DE CALCUL DES TOTAUX ---
   Map<String, double> _calculateTotals() {
-    // Le Vendeur n'a besoin que des quantités et de la valeur de vente potentielle.
+    double totalValeurAchatFC = 0;
     double totalValeurVenteFC = 0;
     double totalStockReceptionne = 0;
     double totalStockDisponible = 0;
 
     for (var produit in _filteredProduits) {
+      final prixAchatUSD = produit.prixAchatUSD ?? 0.0;
       final prixVenteUSD = produit.prix ?? 0.0;
+
       final stockReceptionne = (produit.quantiteInitiale ?? 0).toDouble();
       final stockDisponible = (produit.quantiteActuelle ?? 0).toDouble();
 
       // Conversion en FC
+      final prixAchatFC = prixAchatUSD * _tauxUSD;
       final prixVenteFC = prixVenteUSD * _tauxUSD;
 
-      // Valeur totale du stock actuel (multiplié par stockDisponible)
+      // Valeur totale du stock actuel (multiplié par stockDisponible car c'est la valeur du stock restant)
+      totalValeurAchatFC += prixAchatFC * stockDisponible;
       totalValeurVenteFC += prixVenteFC * stockDisponible;
 
       totalStockReceptionne += stockReceptionne;
       totalStockDisponible += stockDisponible;
     }
 
+    // Calcul de la marge globale potentielle
+    final margeTotaleFC = totalValeurVenteFC - totalValeurAchatFC;
+
     return {
+      'totalValeurAchatFC': totalValeurAchatFC,
       'totalValeurVenteFC': totalValeurVenteFC,
       'totalStockReceptionne': totalStockReceptionne,
       'totalStockDisponible': totalStockDisponible,
+      'margeTotaleFC': margeTotaleFC,
     };
   }
 
-  // --- STRUCTURE DES TOTAUX Vendeur (3 agrégats seulement) ---
+  // --- ACTIONS D'EXPORT (Inchangé) ---
+
+  List<Map<String, dynamic>> _formatDataForReport() {
+    return _filteredProduits.map((p) {
+      final stockReceptionne = p.quantiteInitiale ?? 0;
+      final stockDisponible = p.quantiteActuelle ?? 0;
+      final prixAchatFC = (p.prixAchatUSD ?? 0.0) * _tauxUSD;
+      final prixVenteFC = (p.prix ?? 0.0) * _tauxUSD;
+      final valeurStockFC = prixVenteFC * stockDisponible;
+
+      return {
+        'Nom du Produit': p.nom,
+        'Catégorie': p.categorie ?? '',
+        'P. Achat (FC)': prixAchatFC.toStringAsFixed(0),
+        'P. Vente (FC)': prixVenteFC.toStringAsFixed(0),
+        'Reçu': stockReceptionne.toString(),
+        'Dispo': stockDisponible.toString(),
+        'Valeur Stock (FC)': valeurStockFC.toStringAsFixed(0),
+      };
+    }).toList();
+  }
+
+  void _exportInventairePdf() async {
+    if (_filteredProduits.isEmpty) return;
+    final reportData = _formatDataForReport();
+    final totals = _calculateTotals();
+
+    final pdfBytes = await generateListReport(
+      title: 'INVENTAIRE STOCK (Taux: 1 USD = ${_tauxUSD.toStringAsFixed(0)} FC)',
+      data: reportData,
+      totals: totals,
+    );
+
+    await Printing.sharePdf(bytes: pdfBytes, filename: 'inventaire.pdf');
+  }
+
+  void _printInventaire() async {
+    if (_filteredProduits.isEmpty) return;
+    final reportData = _formatDataForReport();
+    final totals = _calculateTotals();
+
+    await Printing.layoutPdf(
+      onLayout: (format) async => generateListReport(
+        title: 'INVENTAIRE STOCK',
+        data: reportData,
+        totals: totals,
+      ),
+    );
+  }
+
+  // --- CRUD (Inchangé) ---
+  void _navigateToAddProduit() async {
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const AjoutProduits()),
+    );
+    if (result == true) _loadProduits();
+  }
+
+  void _navigateToEditProduit(Produit produit) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => EditeProduits(produit: produit)),
+    );
+    if (result == true) _loadProduits();
+  }
+
+  Future<void> _deleteProduit(Produit produit) async {
+    if (produit.localId == null) return;
+    final confirmed = await _confirmDeletion(produit.nom);
+    if (confirmed) {
+      try {
+        await _dbService.deleteProduit(produit.localId!);
+        _loadProduits();
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Produit supprimé.')));
+      } catch (e) {
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Impossible de supprimer.')));
+      }
+    }
+  }
+
+  Future<bool> _confirmDeletion(String nomProduit) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text("Confirmer la suppression"),
+        content: Text("Supprimer '$nomProduit'?"),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Annuler")),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("Supprimer", style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  // --- ⭐️ MISE À JOUR : COULEURS NOIRES ET CLAIRES POUR LES AGRÉGATS ⭐️ ---
   Widget _buildTotalsRow(Map<String, double> totals) {
     // Formatage pour lisibilité (ex: 1 000 000)
     final f = NumberFormat("#,###", "fr_FR");
 
+    final totalAchat = totals['totalValeurAchatFC'] ?? 0.0;
     final totalVente = totals['totalValeurVenteFC'] ?? 0.0;
+    final totalMarge = totals['margeTotaleFC'] ?? 0.0;
 
     // Pour les quantités, on peut utiliser toStringAsFixed(0) car ce sont des entiers
     final totalRecu = totals['totalStockReceptionne']?.toStringAsFixed(0) ?? '0';
@@ -138,11 +236,12 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
     // Définition de la couleur noire claire
     const Color clearBlack = Colors.black87;
 
-    // Liste des agrégats pour les 3 colonnes
+    // Liste des agrégats pour les 4 colonnes
     final totalStats = [
       _TotalStat(title: 'Qté Reçue', value: totalRecu, color: clearBlack, isQuantity: true),
-      _TotalStat(title: 'Qté Disponible', value: totalDispo, color: clearBlack, isQuantity: true),
-      _TotalStat(title: 'Valeur Vente Totale', value: '${f.format(totalVente)} FC', color: clearBlack, isBold: true, fontSize: 18),
+      _TotalStat(title: 'Qté Disponible', value: totalDispo, color: clearBlack, isQuantity: true), // Couleur uniforme
+      _TotalStat(title: 'Valeur Achat Totale', value: '${f.format(totalAchat)} FC', color: clearBlack), // Couleur uniforme
+      _TotalStat(title: 'Valeur Vente Totale', value: '${f.format(totalVente)} FC', color: clearBlack), // Couleur uniforme
     ];
 
     return Container(
@@ -170,8 +269,9 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
 
           const VerticalDivider(thickness: 2, color: Colors.indigo),
 
-          // 2. Les 3 Agrégats en colonnes égales (Expanded pour prendre l'espace restant)
+          // 2. Les 4 Agrégats en colonnes égales (Expanded pour prendre l'espace)
           Expanded(
+            flex: 8, // Donne plus d'espace pour les 4 colonnes
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: totalStats.map((stat) => Expanded(
@@ -182,12 +282,35 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
               )).toList(),
             ),
           ),
+
+          // 3. Colonne de la Marge (Reste en rouge pour le contraste)
+          Expanded(
+            flex: 3,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 20.0),
+              child: Card(
+                color: Colors.white,
+                elevation: 4,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: _TotalStat(
+                    title: 'Marge Potentielle',
+                    value: '${f.format(totalMarge)} FC',
+                    color: Colors.red.shade700,
+                    isBold: true,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // --- WIDGET PRINCIPAL BUILD ---
+  // --- WIDGET PRINCIPAL BUILD (Inchangé) ---
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -195,17 +318,16 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- EN-TÊTE ET BOUTON AJOUTER (RÉINTÉGRÉ) ---
+          // --- EN-TÊTE ET BOUTON AJOUTER ---
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'Stock des produits disponibles',
+                'Gestion des produits',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
               ),
-              // Bouton "Ajouter un produit" réintégré
               ElevatedButton.icon(
-                onPressed: _navigateToAddProduit, // Utilise la fonction _navigateToAddProduit
+                onPressed: _navigateToAddProduit,
                 icon: const Icon(Icons.add_circle_outline, color: Colors.white),
                 label: const Text('Ajouter un produit',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
@@ -231,7 +353,7 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
           ),
           const SizedBox(height: 20),
 
-          // Recherche (Suppression des boutons PDF/Print)
+          // Recherche
           Row(
             children: [
               Expanded(flex: 3, child: TextField(
@@ -245,7 +367,9 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
                 onChanged: (v) { setState(() => _selectedCategorie = v!); _filterProduits(); },
                 decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
               )),
-              // Suppression des IconButton pour PDF et Imprimer
+              const SizedBox(width: 20),
+              IconButton(icon: const Icon(Icons.picture_as_pdf, color: Colors.red, size: 30), onPressed: _exportInventairePdf, tooltip: 'PDF'),
+              IconButton(icon: const Icon(Icons.print, color: Colors.blue, size: 30), onPressed: _printInventaire, tooltip: 'Imprimer'),
             ],
           ),
           const SizedBox(height: 30),
@@ -280,14 +404,14 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
                       DataColumn(label: Text('Image')),
                       DataColumn(label: Text('Nom du produit')),
                       DataColumn(label: Text('Catégorie')),
-                      // Suppression de la colonne "Prix Achat (FC)"
+                      DataColumn(label: Text('Prix Achat (FC)')),
                       DataColumn(label: Text('Prix Vente (FC)')),
                       DataColumn(label: Text('Stock reçu')),
                       DataColumn(label: Text('Stock Dispo')),
-                      // Suppression de la colonne "Actions"
+                      DataColumn(label: Text('Actions')),
                     ],
                     rows: _filteredProduits.map((p) {
-                      // NOTE: prixAchatFC est calculé mais non affiché
+                      final prixAchatFC = (p.prixAchatUSD ?? 0) * _tauxUSD;
                       final prixVenteFC = (p.prix ?? 0) * _tauxUSD;
                       final stockDispo = p.quantiteActuelle ?? 0;
 
@@ -299,11 +423,14 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
                             DataCell(const Icon(Icons.image_not_supported, color: Colors.grey)),
                             DataCell(Text(p.nom, style: const TextStyle(fontWeight: FontWeight.bold))),
                             DataCell(Text(p.categorie ?? '')),
-                            // Suppression de la DataCell pour le Prix Achat
+                            DataCell(Text('${prixAchatFC.toStringAsFixed(0)} FC')),
                             DataCell(Text('${prixVenteFC.toStringAsFixed(0)} FC')),
                             DataCell(Text((p.quantiteInitiale ?? 0).toString())),
                             DataCell(Text(stockDispo.toString(), style: TextStyle(color: stockDispo <= 5 ? Colors.orange.shade800 : Colors.green.shade800, fontWeight: FontWeight.bold))),
-                            // Suppression de la DataCell pour les Actions
+                            DataCell(Row(children: [
+                              IconButton(icon: const Icon(Icons.edit, color: Colors.blue), onPressed: () => _navigateToEditProduit(p)),
+                              IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteProduit(p)),
+                            ])),
                           ]);
                     }).toList(),
                   ),
@@ -314,7 +441,7 @@ class _GestionStockProduitsVendorState extends State<GestionStockProduitsVendor>
 
           const SizedBox(height: 20),
 
-          // BARRE DE TOTAUX MISE À JOUR (avec 3 agrégats seulement)
+          // BARRE DE TOTAUX MISE À JOUR
           _buildTotalsRow(_calculateTotals()),
         ],
       ),

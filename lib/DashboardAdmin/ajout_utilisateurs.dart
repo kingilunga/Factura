@@ -16,7 +16,7 @@ class _AjoutUtilisateursState extends State<AjoutUtilisateurs> {
   final _prenomController = TextEditingController();
   final _telephoneController = TextEditingController();
   final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _motDePasseController = TextEditingController();
   String _selectedRole = 'vendeur';
 
   @override
@@ -26,7 +26,7 @@ class _AjoutUtilisateursState extends State<AjoutUtilisateurs> {
     _prenomController.dispose();
     _telephoneController.dispose();
     _emailController.dispose();
-    _passwordController.dispose();
+    _motDePasseController.dispose();
     super.dispose();
   }
 
@@ -38,7 +38,7 @@ class _AjoutUtilisateursState extends State<AjoutUtilisateurs> {
         prenom: _prenomController.text,
         telephone: _telephoneController.text,
         email: _emailController.text,
-        motDePasse: _passwordController.text,
+        motDePasse: _motDePasseController.text,
         role: _selectedRole,
       );
 
@@ -148,7 +148,7 @@ class _AjoutUtilisateursState extends State<AjoutUtilisateurs> {
               const SizedBox(height: 16),
               _buildTextFormField(_emailController, 'Adresse E-mail', Icons.email, isEmail: true),
               const SizedBox(height: 16),
-              _buildTextFormField(_passwordController, 'Mot de passe', Icons.lock, isPassword: true),
+              _buildTextFormField(_motDePasseController, 'Mot de passe', Icons.lock, isPassword: true),
               const SizedBox(height: 16),
               _buildRoleDropdown(),
               const SizedBox(height: 24),

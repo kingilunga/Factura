@@ -7,7 +7,7 @@ class Utilisateur {
   final String email;
   final String motDePasse;
   final String role;
-  final bool actif;
+  //final bool actif;
 
   Utilisateur({
     this.localId,
@@ -18,7 +18,7 @@ class Utilisateur {
     required this.email,
     required this.motDePasse,
     required this.role,
-    this.actif = true,
+    //this.actif = true,
   });
 
   factory Utilisateur.fromMap(Map<String, dynamic> map) {
@@ -31,7 +31,7 @@ class Utilisateur {
       email: map['email'] ?? '',
       motDePasse: map['motDePasse'] ?? '',
       role: map['role'] ?? '',
-      actif: map['actif'] == 1 || map['actif'] == true,
+      //actif: map['actif'] == 1 || map['actif'] == true,
     );
   }
 
@@ -45,7 +45,7 @@ class Utilisateur {
       'email': email,
       'motDePasse': motDePasse,
       'role': role,
-      'actif': actif ? 1 : 0,
+      //'actif': actif ? 1 : 0,
     };
   }
 
@@ -59,6 +59,6 @@ class Utilisateur {
     'email',
     'motDePasse',
     'role',
-    'actif',
+    //'actif',
   ];
 }

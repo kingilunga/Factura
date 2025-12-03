@@ -1,25 +1,36 @@
-// Fichier: lib/database/model_ventes.dart
-// Modèles de données pour les Ventes (Header) et les Lignes de Vente (Détails)
-
-
 // ======================================================================
-// --- Modèle Vente (Header de la Facture) ---
+// --- Modèle Vente (Header de la Facture) ---979899100101102103104105106107108109110111112113114115116117118119120121$0
 // ======================================================================
 
 class Vente {
-  final int? localId; // ID local SQLite (PRIMARY KEY)
-  final String venteId; // ID unique (UUID) pour la synchronisation serveur
+  final int? localId;
+  final String venteId;
   final String dateVente;
-  final int clientLocalId; // Référence au client dans la table 'clients'
-  final String? vendeurNom; // Nom du vendeur/utilisateur
-  final double totalBrut;
-  final double reductionPercent; // Réduction appliquée (ex: 5.0 pour 5%)
-  final double totalNet;
-  final String statut; // Ex: 'Enregistrée', 'Payée', 'Annulée'
+  final int clientLocalId;
+  final String? vendeurNom;
 
-  // Champs de synchronisation (non requis pour le fonctionnement local)
+  final String? modePaiement;
+  final String? deviseTransaction;
+  final double? tauxDeChange;
+
+  final double totalBrut;
+  final double reductionPercent;
+  final double totalNet;
+  final String statut;
+
+  final double? montantEncaisse; // Montant réellement payé
+
+  // Champs de synchronisation
   final String? serverId;
-  final String? syncStatus; // Ex: 'pending', 'synced'
+  final String? syncStatus;
+
+
+  // Calcule le montant monétaire de la réduction à la volée.
+  double get montantReduction {
+    if (reductionPercent == 0 || totalBrut == 0) return 0.0;
+    return totalBrut * (reductionPercent / 100.0);
+  }
+
 
   Vente({
     this.localId,
@@ -27,10 +38,14 @@ class Vente {
     required this.dateVente,
     required this.clientLocalId,
     this.vendeurNom,
+    this.modePaiement,
+    this.deviseTransaction,
+    this.tauxDeChange,
     required this.totalBrut,
     required this.reductionPercent,
     required this.totalNet,
     required this.statut,
+    this.montantEncaisse,
     this.serverId,
     this.syncStatus = 'pending',
   });
@@ -43,10 +58,15 @@ class Vente {
       'dateVente': dateVente,
       'clientLocalId': clientLocalId,
       'vendeurNom': vendeurNom,
+      'modePaiement': modePaiement,
+      'deviseTransaction': deviseTransaction,
+      'tauxDeChange': tauxDeChange,
       'totalBrut': totalBrut,
       'reductionPercent': reductionPercent,
       'totalNet': totalNet,
       'statut': statut,
+      // Utilisation de ?? 0.0 pour garantir que ce n'est pas NULL lors de l'écriture
+      'montantEncaisse': montantEncaisse ?? 0.0,
       'serverId': serverId,
       'syncStatus': syncStatus,
     };
@@ -54,34 +74,69 @@ class Vente {
 
   // Crée un objet Vente à partir d'un Map (récupération depuis SQLite)
   factory Vente.fromMap(Map<String, dynamic> map) {
-    // Note: Il est crucial de vérifier si les champs peuvent être null en BDD
-    // pour éviter les erreurs de type (type-casting) si la BDD est vide ou non initialisée.
+    // ⭐️ FONCTION DE SÉCURITÉ CONTRE LES ERREURS DE TYPE 'STRING'
+    double _safeToDouble(dynamic value, {double defaultValue = 0.0}) {
+      if (value == null) return defaultValue;
+      if (value is num) return value.toDouble();
+      if (value is String) {
+        // Tente la conversion de la String en double, sinon retourne la valeur par défaut.
+        return double.tryParse(value) ?? defaultValue;
+      }
+      return defaultValue; // Fallback général
+    }
+
+    // ⭐️ FONCTION DE SÉCURITÉ POUR LES CHAMPS NULLABLES
+    double? _safeToNullableDouble(dynamic value) {
+      if (value == null) return null;
+      if (value is num) return value.toDouble();
+      if (value is String) {
+        // Tente la conversion, sinon retourne null.
+        return double.tryParse(value);
+      }
+      return null; // Fallback général
+    }
+
     return Vente(
       localId: map['localId'] as int?,
       venteId: map['venteId'] as String,
       dateVente: map['dateVente'] as String,
       clientLocalId: map['clientLocalId'] as int,
       vendeurNom: map['vendeurNom'] as String?,
-      totalBrut: (map['totalBrut'] as num).toDouble(), // Assurez-vous que c'est bien un double/num
-      reductionPercent: (map['reductionPercent'] as num).toDouble(),
-      totalNet: (map['totalNet'] as num).toDouble(),
+      modePaiement: map['modePaiement'] as String?,
+      deviseTransaction: map['deviseTransaction'] as String?,
+
+      // Utilisation des fonctions sécurisées pour tous les doubles
+      tauxDeChange: _safeToNullableDouble(map['tauxDeChange']),
+
+      // Pour les champs non-nullable (requis), on utilise _safeToDouble
+      totalBrut: _safeToDouble(map['totalBrut']),
+      reductionPercent: _safeToDouble(map['reductionPercent']),
+      totalNet: _safeToDouble(map['totalNet']),
       statut: map['statut'] as String,
+
+      // Correction de l'erreur ici (utilise _safeToNullableDouble)
+      montantEncaisse: _safeToNullableDouble(map['montantEncaisse']),
+
       serverId: map['serverId'] as String?,
       syncStatus: map['syncStatus'] as String?,
     );
   }
 
-  // --- CORRECTION 1/2 : Ajout de la méthode copyWith pour Vente ---
+  // Ajout de la méthode copyWith pour Vente
   Vente copyWith({
     int? localId,
     String? venteId,
     String? dateVente,
     int? clientLocalId,
     String? vendeurNom,
+    String? modePaiement,
+    String? deviseTransaction,
+    double? tauxDeChange,
     double? totalBrut,
     double? reductionPercent,
     double? totalNet,
     String? statut,
+    double? montantEncaisse,
     String? serverId,
     String? syncStatus,
   }) {
@@ -91,10 +146,14 @@ class Vente {
       dateVente: dateVente ?? this.dateVente,
       clientLocalId: clientLocalId ?? this.clientLocalId,
       vendeurNom: vendeurNom ?? this.vendeurNom,
+      modePaiement: modePaiement ?? this.modePaiement,
+      deviseTransaction: deviseTransaction ?? this.deviseTransaction,
+      tauxDeChange: tauxDeChange ?? this.tauxDeChange,
       totalBrut: totalBrut ?? this.totalBrut,
       reductionPercent: reductionPercent ?? this.reductionPercent,
       totalNet: totalNet ?? this.totalNet,
       statut: statut ?? this.statut,
+      montantEncaisse: montantEncaisse ?? this.montantEncaisse,
       serverId: serverId ?? this.serverId,
       syncStatus: syncStatus ?? this.syncStatus,
     );
@@ -103,6 +162,7 @@ class Vente {
 
 // ======================================================================
 // --- Modèle LigneVente (Détail du Produit Vendu) ---
+// Note: Pas de changement, mais on sécurise aussi la lecture des doubles
 // ======================================================================
 
 class LigneVente {
@@ -150,21 +210,32 @@ class LigneVente {
 
   // Crée un objet LigneVente à partir d'un Map
   factory LigneVente.fromMap(Map<String, dynamic> map) {
+    // Fonction de sécurité locale
+    double _safeToDouble(dynamic value, {double defaultValue = 0.0}) {
+      if (value == null) return defaultValue;
+      if (value is num) return value.toDouble();
+      if (value is String) {
+        return double.tryParse(value) ?? defaultValue;
+      }
+      return defaultValue;
+    }
+
     return LigneVente(
       localId: map['localId'] as int?,
       ligneVenteId: map['ligneVenteId'] as String,
       venteLocalId: map['venteLocalId'] as int,
       produitLocalId: map['produitLocalId'] as int,
       nomProduit: map['nomProduit'] as String,
-      prixVenteUnitaire: (map['prixVenteUnitaire'] as num).toDouble(),
-      quantite: map['quantite'] as int,
-      sousTotal: (map['sousTotal'] as num).toDouble(),
+      // Application de la lecture sécurisée aux doubles
+      prixVenteUnitaire: _safeToDouble(map['prixVenteUnitaire']),
+      quantite: map['quantite'] as int, // Ints sont généralement sûrs
+      sousTotal: _safeToDouble(map['sousTotal']),
       serverId: map['serverId'] as String?,
       syncStatus: map['syncStatus'] as String?,
     );
   }
 
-  // --- CORRECTION 2/2 : Ajout de la méthode copyWith pour LigneVente ---
+  // Ajout de la méthode copyWith pour LigneVente
   LigneVente copyWith({
     int? localId,
     String? ligneVenteId,

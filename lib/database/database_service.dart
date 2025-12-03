@@ -2,15 +2,17 @@
 // Service SQLite complet pour Factura Vision (Desktop/Web)
 
 import 'dart:io';
+import 'package:factura/Modeles/model_achat_produits.dart';
 import 'package:factura/Modeles/model_clients.dart';
+import 'package:factura/Modeles/model_proforma.dart';
 import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:factura/Modeles/model_produits.dart';
 import 'package:factura/Modeles/model_fournisseurs.dart';
 import 'package:factura/Modeles/model_ventes.dart';
-import 'package:factura/Modeles/model_taux_change.dart';
+import 'package:factura/Modeles/model_produits.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 // ======================================================================
 // --- MODÈLES D'APERÇU SIMPLIFIÉS POUR LE TABLEAU DE BORD ---
@@ -77,17 +79,20 @@ class VenteTendance {
 
   VenteTendance({required this.label, required this.montant});
 }
-
 // ======================================================================
 // --- DATABASE SERVICE CLASS ---
-// ======================================================================
-
+const String tableAchatsProduits = 'achats_produit';
 class DatabaseService {
+  DatabaseService() {
+    // Initialisation ou configuration
+  }
   // --- Singleton ---
-  static final DatabaseService instance = DatabaseService._init();
-  DatabaseService._init();
+  DatabaseService._privateConstructor();
+  static final DatabaseService instance = DatabaseService._privateConstructor();
 
   static Database? _database;
+  bool _isInit = false;            // ⚠ Empêche double initialisation
+  final String dbName = "factura_vision.db";
 
   // --- Noms des tables ---
   final String usersTable = 'utilisateurs';
@@ -96,29 +101,58 @@ class DatabaseService {
   final String fournisseursTable = 'fournisseurs';
   final String ventesTable = 'ventes';
   final String lignesVenteTable = 'lignes_vente';
+  final String achatsProduitTable = 'achats_produit';
+  // [MODIFICATION] NOUVELLES TABLES PRO-FORMA
+  final String proformasTable = 'proformas';
+  final String lignesProFormaTable = 'lignes_proforma';
 
-  // --- Getter DB ---
+  // ======================================================================
+  // GETTER database : sécurisé et ne plante JAMAIS
+  // ======================================================================
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDB('factura_vision.db');
+    if (_database == null) {
+      await _init();
+    }
     return _database!;
   }
 
-  // --- Initialisation DB ---
-  Future<Database> _initDB(String filePath) async {
-    // Note: getApplicationDocumentsDirectory() fonctionne pour Flutter Desktop/Mobile
-    // Pour une version Web, l'implémentation sqflite_common_ffi doit être gérée différemment.
-    Directory documentsDirectory = await getApplicationDocumentsDirectory();
-    final path = join(documentsDirectory.path, filePath);
+  // ======================================================================
+  // INITIALISATION (Desktop + Mobile)
+  // ======================================================================
+  Future<void> _init() async {
+    if (_isInit) return; // évite double init
+    _isInit = true;
 
-    return await openDatabase(
+    // Desktop : activer SQLite FFI
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+
+    _database = await _openDB();
+  }
+
+  // ======================================================================
+  // OUVERTURE PHYSIQUE DE LA DB
+  // ======================================================================
+  Future<Database> _openDB() async {
+    Directory documentsDirectory = await getApplicationDocumentsDirectory();
+    final path = join(documentsDirectory.path, dbName);
+
+    print("📁 Chemin DB : $path");
+
+    return await databaseFactory.openDatabase(
       path,
-      version: 1,
-      onCreate: _createDB,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: _createDB,
+      ),
     );
   }
 
-  // --- Création des tables ---
+  // ======================================================================
+  // CRÉATION DES TABLES
+  // ======================================================================
   Future _createDB(Database db, int version) async {
     const idType = 'INTEGER PRIMARY KEY AUTOINCREMENT';
     const textType = 'TEXT';
@@ -137,7 +171,7 @@ class DatabaseService {
         prenom $textType,
         telephone $textType,
         email $textNotNull UNIQUE,
-        motDePasseHash $textNotNull,
+        motDePasse $textNotNull,
         role $textNotNull,
         serverId $textType,
         syncStatus $textType
@@ -154,10 +188,12 @@ class DatabaseService {
         imagePath TEXT,
         idTransaction INTEGER DEFAULT 0,
         serverId INTEGER,
-        syncStatus TEXT DEFAULT 'pending'
+        syncStatus TEXT DEFAULT 'pending',
+        -- 👇 AJOUTEZ CES DEUX LIGNES :
+        prixAchatUSD REAL DEFAULT 0.0,
+        fraisAchatUSD REAL DEFAULT 0.0
       )
     ''');
-
 
     // --- Table Clients ---
     await db.execute('''
@@ -173,18 +209,17 @@ class DatabaseService {
 
     // --- Table Fournisseurs ---
     await db.execute('''
-      CREATE TABLE $fournisseursTable (
-        localId $idType,
-        nomEntreprise $textNotNull,
-        nomContact $textNotNull,
-        email $textType,
-        telephone $textType,
-        serverId $integerType,
-        syncStatus $textType
+      CREATE TABLE fournisseurs (
+        localId INTEGER PRIMARY KEY AUTOINCREMENT,
+        nomEntreprise TEXT NOT NULL,
+        nomContact TEXT, 
+        email TEXT,
+        telephone TEXT,
+        serverId INTEGER,
+        syncStatus TEXT
       )
     ''');
-
-    // --- Table Ventes (ATTENTION: dateVente DOIT être un ISO String 'YYYY-MM-DD HH:MM:SS.SSS') ---
+// --- Table Ventes (ATTENTION: dateVente DOIT être un ISO String 'YYYY-MM-DD HH:MM:SS.SSS') ---
     await db.execute('''
       CREATE TABLE $ventesTable (
         localId $idType,
@@ -192,9 +227,13 @@ class DatabaseService {
         dateVente $textNotNull,
         clientLocalId $integerNotNull,
         vendeurNom $textType,
+        modePaiement $textType, 
+        deviseTransaction $textType, 
+        tauxDeChange $realType,        
         totalBrut $realNotNull,
         reductionPercent $realNotNull,
         totalNet $realNotNull,
+        montantEncaisse REAL,
         statut $textNotNull,
         serverId $textType,
         syncStatus $textType
@@ -227,12 +266,67 @@ class DatabaseService {
         dateMiseAJour TEXT NOT NULL
       )
     ''');
+    await db.execute('''
+        CREATE TABLE IF NOT EXISTS achats_produit (
+          localId INTEGER PRIMARY KEY AUTOINCREMENT,
+          achatId TEXT UNIQUE,
+          fournisseurLocalId INTEGER,
+          produitLocalId INTEGER,
+          nomProduit TEXT,
+          nomFournisseur TEXT,
+          telephoneFournisseur TEXT,
+          type TEXT,
+          emballage TEXT,
+          quantiteAchetee INTEGER,
+          prixAchatUnitaire REAL,
+          fraisAchatUnitaire REAL,
+          margeBeneficiaire REAL,
+          prixVente REAL,
+          devise TEXT,
+          dateAchat TEXT,
+          datePeremption TEXT,
+          syncStatus TEXT
+        )
+    ''');
+          await db.execute('''
+        CREATE TABLE $proformasTable (
+          localId $idType,
+          proFormaId $textNotNull UNIQUE,
+          dateCreation $textNotNull,
+          clientLocalId $integerNotNull,
+          vendeurNom $textType,
+          deviseTransaction $textType, 
+          tauxDeChange $realType,
+          totalBrut $realNotNull,
+          reductionPercent $realNotNull,
+          totalNet $realNotNull,
+          modePaiement $textType,
+          serverId $textType,
+          syncStatus $textType
+        )
+      ''');
 
+      // [MODIFICATION] --- Table Lignes de Pro-Forma ---
+          await db.execute('''
+        CREATE TABLE $lignesProFormaTable (
+          localId $idType,
+          ligneProFormaId $textNotNull UNIQUE,
+          proFormaLocalId $integerNotNull,
+          produitLocalId $integerNotNull,
+          nomProduit $textNotNull,
+          prixVenteUnitaire $realNotNull,
+          quantite $integerNotNull,
+          sousTotal $realNotNull,
+          serverId $textType,
+          syncStatus $textType,
+          FOREIGN KEY(proFormaLocalId) REFERENCES $proformasTable(localId) ON DELETE CASCADE
+        )
+      ''');
     print("✅ Base de données créée et toutes les tables initialisées.");
   }
 
   // ======================================================================
-  // --- NOUVELLE LOGIQUE DE FILTRAGE TEMPOREL ---
+  // --- CRUD POUR TOUTES LES TABLES . NOUVELLE LOGIQUE DE FILTRAGE TEMPOREL ---
   // ======================================================================
 
   /// Helper pour calculer la date de début de la période
@@ -467,7 +561,9 @@ class DatabaseService {
   // ======================================================================
   // --- MISE À JOUR DU STOCK (Existantes) ---
   // ======================================================================
-  Future<void> updateProductStock(int produitLocalId, int quantiteVendue, {Transaction? txn}) async {
+  Future<void> updateProductStock(
+      int produitLocalId,
+      int quantiteVendue, {Transaction? txn}) async {
     final dbClient = txn ?? await instance.database;
 
     final rowsAffected = await dbClient.rawUpdate(
@@ -663,9 +759,40 @@ class DatabaseService {
     };
   }
 
-  Future<List<Vente>> getAllVentes() async {
+  // Dans lib/database/database_service.dart
+
+// [MODIFICATION] Ajout des paramètres nommés optionnels
+  Future<List<Vente>> getAllVentes({
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await instance.database;
-    final result = await db.query(ventesTable, orderBy: 'dateVente DESC');
+
+    String? whereClause;
+    List<Object?>? whereArgs;
+
+    // [LOGIQUE DE FILTRE PAR PÉRIODE]
+    if (startDate != null && endDate != null) {
+      // La date est généralement stockée en format String ISO 8601 dans SQLite.
+      // Nous utilisons 'dateVente BETWEEN ? AND ?' pour filtrer entre les deux dates (incluses).
+      whereClause = 'dateVente BETWEEN ? AND ?';
+      whereArgs = [
+        startDate.toIso8601String(),
+        endDate.toIso8601String()
+      ];
+      // [NOTE IMPORTANTE] : Si vous stockez les dates uniquement (sans l'heure)
+      // l'utilisation de endDate.toIso8601String() fonctionne bien car
+      // l'interface utilisateur ajoute l'heure de fin de journée (23:59:59).
+    }
+
+    // Exécute la requête, en appliquant le filtre (WHERE) si les dates sont fournies.
+    final result = await db.query(
+        ventesTable,
+        where: whereClause,      // null si pas de filtre de date
+        whereArgs: whereArgs,    // null si pas de filtre de date
+        orderBy: 'dateVente DESC'
+    );
+
     return result.map((json) => Vente.fromMap(json)).toList();
   }
 
@@ -809,10 +936,7 @@ class DatabaseService {
 
     return result;
   }
-  // ======================================================================
 // --- MÉTHODES TOP PRODUITS / TOP CLIENTS POUR VENDOR (filtrables) ---
-// ======================================================================
-
   /// Top produits vendus, optionnellement filtrés par vendeur
   Future<List<ProduitApercu>> fetchTopProducts({int? vendeurId, int limit = 5}) async {
     final db = await database;
@@ -998,5 +1122,276 @@ class DatabaseService {
       whereArgs: ['SuperAdmin'],     // valeur pour la condition
     );
   }
+// CRUD AchatsProduit simplifié (uniquement insertion et lecture)
+// --------------------------------------------------------
 
+  Future<int> insertAchat(AchatsProduit achat) async {
+    final db = await database;
+    return await db.insert(
+      'achats_produit',
+      achat.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+  Future<int> updateAchat(AchatsProduit achat) async {
+    final db = await database;
+    return await db.update(
+      'achats_produit',
+      achat.toMap(),
+      where: 'localId = ?',
+      whereArgs: [achat.localId],
+    );
+  }
+
+  Future<int> deleteAchat(int localId) async {
+    final db = await database;
+    return await db.delete(
+      'achats_produit',
+      where: 'localId = ?',
+      whereArgs: [localId],
+    );
+  }
+
+// Optionnel : jointure avec les fournisseurs (lecture seule)
+  Future<List<AchatsProduit>> fetchAchatsAvecFournisseur() async {
+    final db = await database;
+    final results = await db.rawQuery('''
+    SELECT a.*, f.nomEntreprise AS fournisseurNom
+    FROM achats_produit a
+    LEFT JOIN fournisseurs f ON a.fournisseurLocalId = f.localId
+    ORDER BY a.dateAchat DESC
+  ''');
+    return results.map((map) => AchatsProduit.fromMap(map)).toList();
+  }
+
+// Méthodes de suppression par ID
+  Future<void> deleteAchatById(int localId) async {
+    final db = await database;
+    await db.delete(
+      'achats_produit',
+      where: 'localId = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  Future<void> deleteAchatByAchatId(String achatId) async {
+    final db = await database;
+    await db.delete(
+      'achats_produit',
+      where: 'achatId = ?',
+      whereArgs: [achatId],
+    );
+  }
+
+// Ces fonctions garantissent que la table achats_produit et produits sont synchronisées.
+// ======================================================================
+
+  /// 1. CREATE TRANSACTIONNEL : Enregistre un achat et incrémente le stock.
+  /// REMPLACE l'ancienne fonction insertAchat et insertAchatsProduit.
+  Future<int> enregistrerNouvelAchatTransactionnel(
+      Map<String, dynamic> achatData, // Doit contenir 'produitLocalId' et 'quantiteAchetee'
+      ) async {
+    final db = await database;
+
+    // On suppose que achatData contient les clés correctes comme requis par le modèle.
+    final int produitId = achatData['produitLocalId'];
+    final int quantiteAchetee = achatData['quantiteAchetee'];
+
+    int newAchatId = await db.transaction((txn) async {
+      // 1. Enregistrement de l'achat (historique)
+      int achatId = await txn.insert(
+        achatsProduitTable, // 'achats_produit'
+        achatData,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+
+      // 2. Mise à jour du stock : Incrémentation de la quantité
+      await txn.rawUpdate(
+        'UPDATE $produitsTable SET quantiteActuelle = quantiteActuelle + ? WHERE localId = ?',
+        [quantiteAchetee, produitId],
+      );
+
+      return achatId;
+    });
+
+    return newAchatId;
+  }
+
+  /// 2. READ : Récupère tous les achats (inchangé, mais renommé pour clarté)
+  Future<List<AchatsProduit>> fetchAllAchats() async {
+    final db = await database;
+    // On utilise le nom de table défini en haut (achatsProduitTable)
+    final List<Map<String, dynamic>> maps = await db.query(achatsProduitTable);
+    return maps.map((map) => AchatsProduit.fromMap(map)).toList();
+  }
+
+  /// 3. UPDATE TRANSACTIONNEL : Modifie un achat et ajuste le stock.
+  /// REMPLACE l'ancienne fonction updateAchat.
+  Future<void> modifierAchatEtAjusterStock({
+    required int achatId,
+    required int produitId,
+    required int ancienneQuantite, // Quantité avant la modification
+    required int nouvelleQuantite,
+    required Map<String, dynamic> nouvellesDonneesAchat, // Les données de la ligne achat_produit
+  }) async {
+    final db = await database;
+
+    final int difference = nouvelleQuantite - ancienneQuantite;
+
+    await db.transaction((txn) async {
+      // 1. Mise à jour des données d'achat
+      await txn.update(
+        achatsProduitTable,
+        nouvellesDonneesAchat,
+        where: 'localId = ?',
+        whereArgs: [achatId],
+      );
+
+      // 2. Ajustement du stock : ajout de la différence (qui peut être négative)
+      await txn.rawUpdate(
+        'UPDATE $produitsTable SET quantiteActuelle = quantiteActuelle + ? WHERE localId = ?',
+        [difference, produitId],
+      );
+    });
+  }
+  /// 4. DELETE TRANSACTIONNEL : Supprime un achat et diminue le stock.
+  /// REMPLACE l'ancienne fonction deleteAchat.
+  Future<void> supprimerAchatEtAjusterStock({
+    required int achatId,
+    required int produitId,
+    required int quantiteSupprimee, // Quantité à soustraire du stock
+  }) async {
+    final db = await database;
+
+    await db.transaction((txn) async {
+      // 1. Suppression de l'achat
+      await txn.delete(
+        achatsProduitTable,
+        where: 'localId = ?',
+        whereArgs: [achatId],
+      );
+      // 2. Diminution du stock
+      await txn.rawUpdate(
+        'UPDATE $produitsTable SET quantiteActuelle = quantiteActuelle - ? WHERE localId = ?',
+        [quantiteSupprimee, produitId],
+      );
+    });
+  }
+// --- FIN CRUD ACHATS TRANSACTIONNEL ---
+  /// Récupère le taux de change le plus récent USD/FC.
+  Future<double?> getLatestExchangeRate() async {
+    final dbClient = await database;
+
+    const String tableName = 'taux_change';
+    const String dateCol = 'dateMiseAJour';
+
+    // ⭐️ CRITIQUE : La devise que vous voulez lire ⭐️
+    const String targetDevise = 'USD'; // DOIT correspondre à la devise que vous enregistrez
+
+    try {
+      final List<Map<String, dynamic>> maps = await dbClient.query(
+        tableName,
+        columns: ['taux'],
+        where: 'devise = ?', // ⭐️ AJOUT : Filtrer pour ne prendre que le taux USD ⭐️
+        whereArgs: [targetDevise],
+        orderBy: '$dateCol DESC',
+        limit: 1,
+      );
+
+      if (maps.isNotEmpty) {
+        final val = maps.first['taux'];
+        // Le reste du code de conversion est correct
+        return (val is num) ? val.toDouble() : double.tryParse(val.toString());
+      }
+
+      // Si la table est vide ou si 'USD' n'est pas trouvé, on retourne null.
+      // L'UI (ventes.dart) gérera le null pour afficher 1.0.
+      return null;
+    } catch (e) {
+      print("Erreur SQL Taux: $e");
+      // En cas d'erreur, retourner null.
+      return null;
+    }
+  }
+  ///Future<double?> getLatestExchangeRate() async {
+  ///final dbClient = await database;
+  //
+  //     const String tableName = 'taux_change';
+  //     const String dateCol = 'dateMiseAJour';
+  //
+  //     try {
+  //       final List<Map<String, dynamic>> maps = await dbClient.query(
+  //         tableName,
+  //         columns: ['taux'],
+  //         orderBy: '$dateCol DESC',
+  //         limit: 1,
+  //       );
+  //
+  //       if (maps.isNotEmpty) {
+  //         final val = maps.first['taux'];
+  //         return (val is num) ? val.toDouble() : double.tryParse(val.toString());
+  //       }
+  //       // Si la table est vide, on retourne 1.0 par défaut
+  //       return 1.0;
+  //     } catch (e) {
+  //       print("Erreur SQL Taux: $e");
+  //       return 1.0;
+  //     }
+  //   }
+  // 💡 CORRECTION ICI : Utilisez 'database' (le getter) au lieu de 'db'
+
+  Future<int> insertProForma(ProForma proForma, List<LigneProForma> lignes) async {
+    final db = await instance.database;
+
+    // 1. Insérer le header de la pro-forma
+    final id = await db.insert(proformasTable, proForma.toMap());
+
+    // 2. Insérer les lignes de détail
+    for (var ligne in lignes) {
+      // Crée une nouvelle ligne de pro-forma en référençant le nouvel ID
+      final ligneToInsert = LigneProForma(
+        // ... (copie des autres champs)
+        ligneProFormaId: ligne.ligneProFormaId,
+        proFormaLocalId: id, // <--- ID du header
+        produitLocalId: ligne.produitLocalId,
+        nomProduit: ligne.nomProduit,
+        prixVenteUnitaire: ligne.prixVenteUnitaire,
+        quantite: ligne.quantite,
+        sousTotal: ligne.sousTotal,
+      );
+      await db.insert(lignesProFormaTable, ligneToInsert.toMap());
+    }
+    return id;
+  }
+
+  Future<List<ProForma>> getAllProFormas() async {
+    final db = await instance.database;
+    final result = await db.query(proformasTable, orderBy: 'dateCreation DESC');
+    return result.map((json) => ProForma.fromMap(json)).toList();
+  }
+
+  Future<List<LigneProForma>> getLignesByProForma(int proFormaLocalId) async {
+    final db = await instance.database;
+    final result = await db.query(
+      lignesProFormaTable,
+      where: 'proFormaLocalId = ?',
+      whereArgs: [proFormaLocalId],
+    );
+    return result.map((json) => LigneProForma.fromMap(json)).toList();
+  }
+  // NOUVELLE VERSION (LA VRAIE LOGIQUE DE LECTURE SQLite)
+  Future<List<AchatsProduit>> getAllAchatsProduits() async {
+    final db = await database; // 1. Accès à la DB
+
+    // 2. Exécution de la requête SQL pour obtenir toutes les lignes de la table
+    final List<Map<String, dynamic>> maps = await db.query(
+      tableAchatsProduits,
+      orderBy: 'dateAchat DESC',
+    );
+
+    // 3. Conversion des résultats bruts (maps) en objets Dart (AchatsProduit)
+    return List.generate(maps.length, (i) {
+      return AchatsProduit.fromMap(maps[i]);
+    });
+  }
 }

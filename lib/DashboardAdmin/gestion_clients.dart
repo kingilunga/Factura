@@ -6,7 +6,15 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:sqflite/sqflite.dart' as sql;
-import 'package:uuid/uuid.dart'; // Nécessaire pour générer des IDs uniques pour les ventes de test
+import 'package:uuid/uuid.dart';
+// L'import de la page 'modifier_client_page.dart' a été supprimé pour éviter l'erreur.
+
+class GestionClients extends StatefulWidget {
+  const GestionClients({super.key});
+
+  @override
+  State<GestionClients> createState() => _GestionClientsState();
+}
 
 // Petit modèle pour contenir les statistiques d'un client
 class ClientStats {
@@ -24,21 +32,20 @@ class ClientData {
   ClientData(this.client, this.stats);
 }
 
-class GestionClients extends StatefulWidget {
-  const GestionClients({super.key});
-
-  @override
-  State<GestionClients> createState() => _GestionClientsState();
-}
-
 class _GestionClientsState extends State<GestionClients> {
-  // Initialise le service de base de données
   final DatabaseService _dbService = DatabaseService.instance;
   List<Client> _clients = [];
   List<Client> _filteredClients = [];
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
-  final Uuid _uuid = const Uuid(); // Pour générer un venteId unique
+  final Uuid _uuid = const Uuid();
+
+  // --- SIMULATION DE RÔLE : Si cet utilisateur est un simple vendeur, cette variable est false. ---
+  final bool _canEditOrDelete = false;
+
+  // Message personnalisé affiché si l'utilisateur clique sans permission.
+  static const String _permissionMessage =
+      'Action non autorisée. Veuillez contacter l\'administrateur pour modifier ou supprimer des clients.';
 
   @override
   void initState() {
@@ -54,6 +61,17 @@ class _GestionClientsState extends State<GestionClients> {
     super.dispose();
   }
 
+  // Fonction utilitaire pour afficher le message de permission refusée
+  void _showPermissionDeniedMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_permissionMessage),
+        backgroundColor: Colors.orange.shade700,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   // --- Chargement initial des clients ---
   Future<void> _loadClients() async {
     setState(() => _isLoading = true);
@@ -61,7 +79,7 @@ class _GestionClientsState extends State<GestionClients> {
       final clients = await _dbService.getAllClients();
       setState(() {
         _clients = clients;
-        _filterClients(); // Appelle le filtre pour mettre à jour la liste filtrée
+        _filterClients();
         _isLoading = false;
       });
     } catch (e) {
@@ -76,7 +94,7 @@ class _GestionClientsState extends State<GestionClients> {
       final db = await _dbService.database;
 
       final List<Map<String, dynamic>> result = await db.query(
-        _dbService.ventesTable, // 'ventes'
+        _dbService.ventesTable,
         columns: ['COUNT(localId) as totalAchats', 'SUM(totalNet) as chiffreAffaires'],
         where: 'clientLocalId = ?',
         whereArgs: [clientLocalId],
@@ -106,7 +124,6 @@ class _GestionClientsState extends State<GestionClients> {
     final db = await _dbService.database;
     int salesCount = 0;
 
-    // Fonction utilitaire pour insérer une vente de test selon le schéma Ventes
     Future<void> insertSale(int clientId, double amount) async {
       await db.insert(
         _dbService.ventesTable,
@@ -127,7 +144,6 @@ class _GestionClientsState extends State<GestionClients> {
       salesCount++;
     }
 
-    // Insère des achats pour les deux premiers clients (si présents)
     if (_clients.first.localId != null) {
       for (int i = 1; i <= 5; i++) {
         await insertSale(_clients.first.localId!, 10000.0 + 5000.0 * i);
@@ -145,10 +161,13 @@ class _GestionClientsState extends State<GestionClients> {
     );
   }
 
-  // --- Logique de suppression d'un client ---
-
-  // 1. Demande de confirmation (Utilise un AlertDialog pour une confirmation propre)
+  // --- Logique de suppression d'un client (Avec vérification de rôle) ---
   Future<bool> _confirmDeletion(String nomClient) async {
+    if (!_canEditOrDelete) {
+      _showPermissionDeniedMessage();
+      return false;
+    }
+
     return await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
@@ -167,20 +186,21 @@ class _GestionClientsState extends State<GestionClients> {
           ],
         );
       },
-    ) ??
-        false;
+    ) ?? false;
   }
 
-  // 2. Exécution de la suppression
   Future<void> _deleteClient(Client client) async {
     if (client.localId == null) return;
+
+    if (!_canEditOrDelete) {
+      _showPermissionDeniedMessage();
+      return;
+    }
 
     final confirmed = await _confirmDeletion(client.nomClient);
     if (confirmed) {
       try {
-        await _dbService.deleteClient(client.localId!); // Appelle la méthode de suppression DB
-
-        // Recharger la liste pour mettre à jour l'UI
+        await _dbService.deleteClient(client.localId!);
         _loadClients();
 
         if (mounted) {
@@ -216,7 +236,34 @@ class _GestionClientsState extends State<GestionClients> {
     });
   }
 
-  // --- Génération du Rapport PDF (Utilise maintenant totalNet) ---
+  // --- Gestion de la navigation vers la page d'édition (Simulation) ---
+  void _openEditClientPage(Client client) {
+    // 1. Vérification des droits (Vendeur)
+    if (!_canEditOrDelete) {
+      _showPermissionDeniedMessage();
+      return;
+    }
+
+    // 2. Si l'utilisateur est Admin, nous SIMULONS l'ouverture de la page de modification.
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Modification du client : ${client.nomClient}'),
+        content: const Text(
+            'Cette boîte de dialogue SIMULE la page "ModifierClientPage". '
+                'Elle serait normalement implémentée ici pour permettre à l\'administrateur de mettre à jour les données du client.'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fermer la simulation'),
+          )
+        ],
+      ),
+    );
+  }
+
+  // --- Génération du Rapport PDF (Non modifié) ---
   Future<void> _generateClientReportPdf() async {
     setState(() => _isLoading = true);
 
@@ -306,23 +353,19 @@ class _GestionClientsState extends State<GestionClients> {
         backgroundColor: const Color(0xFF13132D),
         foregroundColor: Colors.white,
         actions: [
-          // Bouton d'insertion de données de test (pour la vérification)
           if (!_isLoading && _clients.isNotEmpty)
+          //IconButton(
+          //icon: const Icon(Icons.add_shopping_cart),
+          //tooltip: 'Insérer Ventes Test',
+          //onPressed: _insertDummySales,
+          //),
             IconButton(
-              icon: const Icon(Icons.add_shopping_cart),
-              tooltip: 'Insérer Ventes Test',
-              onPressed: _insertDummySales,
+              icon: const Icon(Icons.picture_as_pdf),
+              tooltip: 'Imprimer la liste des clients',
+              onPressed: _filteredClients.isNotEmpty && !_isLoading
+                  ? _generateClientReportPdf
+                  : null,
             ),
-
-          // Bouton PDF
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            tooltip: 'Imprimer la liste des clients',
-            onPressed: _filteredClients.isNotEmpty && !_isLoading
-                ? _generateClientReportPdf
-                : null,
-          ),
-          // Le bouton "Ajouter un client" est délibérément omis.
         ],
       ),
       body: Column(
@@ -418,33 +461,31 @@ class _GestionClientsState extends State<GestionClients> {
                             ),
                           ],
                         ),
+
+                        // --- ESPACE BOUTONS (TOUJOURS VISIBLE) ---
                         trailing: SizedBox(
-                          width: 90, // Espace pour les deux boutons
+                          width: 90,
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               // Bouton Modifier
                               IconButton(
                                 icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
-                                onPressed: () {
-                                  // TODO: Remplacer par la navigation vers la page d'édition (prochaine étape !)
-                                  print("Ouverture de la page de modification pour: ${client.nomClient}");
-                                },
+                                onPressed: () => _openEditClientPage(client),
                                 tooltip: 'Modifier',
                               ),
                               // Bouton Supprimer
                               IconButton(
                                 icon: const Icon(Icons.delete, size: 20, color: Colors.red),
-                                onPressed: () => _deleteClient(client), // Appel à la suppression
+                                onPressed: () => _deleteClient(client),
                                 tooltip: 'Supprimer',
                               ),
                             ],
                           ),
                         ),
-                        onTap: () {
-                          // Quand on clique sur la ligne (peut aussi ouvrir la page de détail/modification)
-                          print("Ouverture de la page de détail/modification pour le client: ${client.nomClient}");
-                        },
+
+                        // Action principale au clic (modification)
+                        onTap: () => _openEditClientPage(client),
                       ),
                     );
                   },

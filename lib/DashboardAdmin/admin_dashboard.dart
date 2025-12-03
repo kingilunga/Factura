@@ -1,11 +1,15 @@
 import 'dart:convert';
 
+import 'package:factura/DashboardAdmin/achats_produits.dart' hide DatabaseService;
 import 'package:factura/DashboardAdmin/gestion_clients.dart';
+import 'package:factura/DashboardAdmin/gestion_fournisseurs.dart';
 import 'package:factura/DashboardAdmin/gestion_factures.dart';
+import 'package:factura/DashboardAdmin/gestion_stock_achats_page.dart';
 import 'package:factura/DashboardAdmin/gestion_utilisateurs.dart';
-import 'package:factura/DashboardAdmin/gestion_produits.dart';
+import 'package:factura/DashboardAdmin/gestion_stock_produits.dart';
 import 'package:factura/DashboardAdmin/paramettres.dart';
 import 'package:factura/DashboardAdmin/rapports_page.dart';
+import 'package:factura/DashboardVendor/rapports.dart';
 import 'package:factura/Modeles/model_utilisateurs.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/Splash_login/connexion.dart';
@@ -15,8 +19,10 @@ import 'package:http/http.dart' as http;
 
 // CLASSE CONTENEUR PRINCIPAL DE L'ADMIN
 class AdminDashboardPage extends StatefulWidget {
+
   final Utilisateur user;
   const AdminDashboardPage({super.key, required this.user});
+
 
   // 1. HELPER STATIQUE : Permet aux widgets enfants de naviguer (ex: TableauDeBordAdmin)
   static _AdminDashboardPageState? of(BuildContext context) {
@@ -45,17 +51,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     super.initState();
 
     // Initialisation des pages du Dashboard Admin
+    // 🚨 MISE À JOUR CRITIQUE DE L'ORDRE ET DES INDEX
     _pages = [
-      const TableauDeBordAdmin(),                   // Accueil
-      GestionUtilisateurs(currentUser: widget.user), // Utilisateurs (user obligatoire)
-      const GestionProduits(),                      // Produits
-      const GestionClients(),                       // Clients & Fournisseurs
-      GestionFactures(),                            // Factures
-      RapportsPage(typeDocument: "Facture"),        // Rapports
-      const ParametresAdminPage(),                  // Paramètres
+      const TableauDeBordAdmin(),                   // Index 0 : Accueil
+      GestionUtilisateurs(currentUser: widget.user), // Index 1 : Utilisateurs
+      const GestionStockProduits(),                      // Index 2 : Produits (Stock)
+      const GestionClients(),                        // Index 3 : NOUVEAU - Clients
+      const GestionFournisseurs(),                   // Index 4 : NOUVEAU - Fournisseurs
+      const AchatsProduitsPage(),                  // Index 5 : Achats Produits
+      const GestionStockAchatsPage(),                      // Index 6 : Stock d'achats
+      GestionFactures(),                            // Index 7 : Factures
+      Rapports(typeDocument: "Facture"),        // Index 8 : Rapports
+      const ParametresAdminPage(),                  // Index 9 : Paramètres
     ];
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -79,9 +88,31 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
+  // 🚨 NOUVELLE VERSION DE LA BARRE LATÉRALE AVEC EXPANSIONTILE
   Widget _buildDrawer(BuildContext context) {
     final String fullName =
         '${widget.user.prenom ?? ''}${(widget.user.postnom != null && widget.user.postnom!.isNotEmpty) ? ' ${widget.user.postnom!}' : ''} ${widget.user.nom ?? ''}';
+
+    // Pour savoir si le menu déroulant 'Clients et Fournisseurs' doit rester actif
+    final bool isContactSection = _selectedIndex == 3 || _selectedIndex == 4;
+
+    // Fonction réutilisable pour les sous-menus (indentés)
+    Widget buildSubMenuItem({required String title, required int index}) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 30.0), // Indentation
+        child: ListTile(
+          title: Text(title, style: TextStyle(
+            color: _selectedIndex == index ? Colors.blueAccent : Colors.white70,
+            fontWeight: _selectedIndex == index ? FontWeight.bold : FontWeight.normal,
+          )),
+          selected: _selectedIndex == index,
+          selectedTileColor: Colors.blue.shade700.withOpacity(0.5),
+          onTap: () {
+            selectSection(index);
+          },
+        ),
+      );
+    }
 
     return Container(
       width: 250,
@@ -89,6 +120,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       child: ListView(
         padding: EdgeInsets.zero,
         children: <Widget>[
+          // --- En-tête (Inchangé) ---
           UserAccountsDrawerHeader(
             accountName: Text(fullName, style: const TextStyle(color: Colors.white)),
             accountEmail: Text(widget.user.email ?? '', style: const TextStyle(color: Colors.white70)),
@@ -104,77 +136,113 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
               color: Color(0xFF13132D),
             ),
           ),
+
+          // --- Menu Principal : Tableau de bord (Index 0) ---
           _DrawerItem(
             icon: Icons.dashboard,
             title: 'Tableau de bord',
             index: 0,
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(0);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(0),
           ),
+
+          // --- Menu Principal : Utilisateurs (Index 1) ---
           _DrawerItem(
             icon: Icons.people,
-            title: 'Utilisateurs',
+            title: 'Gestion utilisateurs',
             index: 1,
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(1);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(1),
           ),
+
+          // --- Menu Principal : Gestion des stocks (Index 2) ---
           _DrawerItem(
             icon: Icons.inventory_2,
-            title: 'Produits',
+            title: 'Gestion des stocks',
             index: 2,
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(2);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(2),
           ),
+
+          // --- NOUVEAU MENU DÉROULANT : Clients et Fournisseurs ---
+          ExpansionTile(
+            initiallyExpanded: isContactSection,
+            collapsedIconColor: Colors.white70,
+            iconColor: isContactSection ? Colors.blueAccent : Colors.white70,
+            collapsedTextColor: Colors.white,
+            textColor: Colors.blueAccent,
+            leading: Icon(Icons.business, color: isContactSection ? Colors.blueAccent : Colors.white70),
+            title: Text(
+              'Clients et Fournisseurs',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isContactSection ? Colors.blueAccent : Colors.white,
+              ),
+            ),
+
+            children: <Widget>[
+              // 1. Sous-menu Clients (Index 3)
+              buildSubMenuItem(
+                title: 'Liste des Clients',
+                index: 3,
+              ),
+              // 2. Sous-menu Fournisseurs (Index 4)
+              buildSubMenuItem(
+                title: 'Liste des Fournisseurs',
+                index: 4,
+              ),
+            ],
+          ),
+          // --- FIN DU MENU DÉROULANT ---
+
+          // --- Menu Principal : Achats produits (Index 5) ---
           _DrawerItem(
-            icon: Icons.business,
-            title: 'Clients & Fournisseurs',
-            index: 3,
+            icon: Icons.shopping_basket,
+            title: 'Achats produits',
+            index: 5, // DÉCALÉ
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(3);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(5),
           ),
+
+          // --- Menu Principal : Gestions des achatts (Index 6) ---
           _DrawerItem(
             icon: Icons.receipt,
-            title: 'Factures',
-            index: 4,
+            title: 'Gestions des achatts',
+            index: 6, // DÉCALÉ
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(4);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(6),
           ),
+
+          // --- Menu Principal : Factures (Index 7) ---
           _DrawerItem(
-            icon: Icons.bar_chart,
-            title: 'Rapports',
-            index: 5,
+            icon: Icons.factory, // J'ai gardé l'icône de 'Gestions des achatts' pour Factures
+            title: 'Liste des Factures',
+            index: 7, // DÉCALÉ
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(5);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(7),
           ),
+
+          // --- Menu Principal : Rapports (Index 8) ---
+          _DrawerItem(
+            icon: Icons.fact_check,
+            title: 'Rapports',
+            index: 8, // DÉCALÉ
+            selectedIndex: _selectedIndex,
+            onTap: () => selectSection(8),
+          ),
+
           const Divider(color: Colors.white54),
+
+          // --- Menu Principal : Paramètres (Index 9) ---
           _DrawerItem(
             icon: Icons.settings,
             title: 'Paramètres',
-            index: 6,
+            index: 9, // DÉCALÉ
             selectedIndex: _selectedIndex,
-            onTap: () {
-              selectSection(6);
-              if (MediaQuery.of(context).size.width < 600) Navigator.pop(context);
-            },
+            onTap: () => selectSection(9),
           ),
+
+          // --- Déconnexion (Inchangé) ---
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.white),
             title: const Text('Déconnexion', style: TextStyle(color: Colors.white)),
@@ -184,7 +252,11 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ),
     );
   }
-
+// Votre méthode _confirmLogout, _TableauDeBordAdminState et les classes annexes sont inchangées.
+// Je les inclus à la suite dans le fichier pour que le code soit complet et réutilisable.
+// Il vous faudra déplacer ce code dans le fichier AdminDashboardPage.dart.
+// Notez que j'ai renommé les index.
+// Index de référence : 0:Dashboard, 1:Utilisateurs, 2:Produits, 3:Clients, 4:Fournisseurs, 5:Achats, 6:Stock Achats, 7:Factures, 8:Rapports, 9:Paramètres.
   void _confirmLogout(BuildContext context) {
     showDialog(
       context: context,
@@ -227,7 +299,7 @@ class TableauDeBordAdmin extends StatefulWidget {
 
 class _TableauDeBordAdminState extends State<TableauDeBordAdmin> {
   // --- VARIABLES D'ÉTAT POUR LES DONNÉES RÉELLES ---
-  final DatabaseService _db = DatabaseService.instance;
+  late final _db = DatabaseService.instance;
 
   AdminStats _stats = AdminStats();
   List<VenteRecenteApercu> _recentSales = [];
@@ -420,38 +492,6 @@ class _TableauDeBordAdminState extends State<TableauDeBordAdmin> {
       ),
     );
   }
-
-  // ✅ NOUVEAU : Barre d'information sur le taux de change
-  /*Widget _buildExchangeRateBar() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.lightGreen.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.lightGreen.shade200),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.monetization_on, color: Colors.green.shade700),
-          const SizedBox(width: 8),
-          Text(
-            'Taux du jour: 1 USD = ${_exchangeRateUSDCDF.toStringAsFixed(2)} CDF',
-            style: TextStyle(fontSize: 14, color: Colors.green.shade900, fontWeight: FontWeight.bold),
-          ),
-          const Spacer(),
-          // Bouton pour recharger le taux
-          InkWell(
-            onTap: () => _fetchDashboardData(reloadTrends: true),
-            child: const Tooltip(
-              message: "Recharger le taux de change",
-              child: Icon(Icons.refresh, size: 20, color: Colors.green),
-            ),
-          )
-        ],
-      ),
-    );
-  }*/
-  // En-tête (Nom de l'Admin + Sélecteur de période)
   Widget _buildHeader() {
     final periods = _displayPeriods;
     final isSelectedList = periods.map((p) => p == _selectedPeriod).toList();
@@ -508,24 +548,35 @@ class _TableauDeBordAdminState extends State<TableauDeBordAdmin> {
     return Column(
       children: [
         // ✅ NOUVELLE LIGNE DE KPI (CA en CDF et USD)
+        // Correction: Toutes les cartes sont enveloppées dans Expanded pour partager l'espace
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _KpiCard(
-              label: 'CA Net (CDF)',
-              value: _caEnCDF.toStringAsFixed(2),
-              unit: 'CDF $periodUnit',
-              color: Colors.blue.shade700, // Couleur différente pour le CA
+            Expanded( // <-- Ajouté pour partager l'espace
+              child: _KpiCard(
+                label: 'CA Net (CDF)',
+                value: _caEnCDF.toStringAsFixed(2),
+                unit: 'CDF $periodUnit',
+                color: Colors.blue.shade700, // Couleur différente pour le CA
+              ),
             ),
-            _KpiCard(
-              label: 'CA Net (USD)',
-              value: _caEnUSD.toStringAsFixed(2),
-              unit: 'USD $periodUnit',
-              color: Colors.green.shade700, // Couleur différente pour le CA
+            const SizedBox(width: 10), // Espace entre les cartes
+            Expanded( // <-- Ajouté
+              child: _KpiCard(
+                label: 'CA Net (USD)',
+                value: _caEnUSD.toStringAsFixed(2),
+                unit: 'USD $periodUnit',
+                color: Colors.green.shade700, // Couleur différente pour le CA
+              ),
             ),
-            // Les deux autres cartes prennent le reste de l'espace (inchangé)
-            _KpiCard(label: 'Total Ventes', value: _stats.totalVentes.toString(), unit: periodUnit),
-            _KpiCard(label: 'Total Clients', value: _stats.totalClients.toString(), unit: periodUnit),
+            const SizedBox(width: 10), // Espace entre les cartes
+            Expanded( // <-- Ajouté
+              child: _KpiCard(label: 'Total Ventes', value: _stats.totalVentes.toString(), unit: periodUnit),
+            ),
+            const SizedBox(width: 10), // Espace entre les cartes
+            Expanded( // <-- Ajouté
+              child: _KpiCard(label: 'Total Clients', value: _stats.totalClients.toString(), unit: periodUnit),
+            ),
           ],
         ),
         const SizedBox(height: 16),
@@ -939,7 +990,8 @@ class _DrawerItem extends StatefulWidget {
 class _DrawerItemState extends State<_DrawerItem> {
   bool _isHovering = false;
   // Définition d'une couleur plus forte pour la sélection
-  static const Color _selectedColor = Color.fromARGB(255, 30, 30, 60); // Un bleu marine très foncé/noir bleu
+  static const Color _selectedColor = Color.fromARGB(255, 70, 130, 180); // Bleu acier plus clair
+  // Un bleu marine très foncé/noir bleu
   static const Color _hoverColor = Color.fromARGB(255, 38, 38, 76); // Un peu plus clair pour le survol
 
   @override

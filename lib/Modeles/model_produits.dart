@@ -85,20 +85,29 @@ class Produit {
 
   // Créer un Produit à partir d'une Map SQLite
   factory Produit.fromMap(Map<String, dynamic> map) {
+    // ⭐️ SÉCURITÉ NOM : Garantir que 'nom' est une chaîne valide pour l'Autocomplétion.
+    final nomValue = map['nom'];
+    final safeNom = nomValue == null ? '' : nomValue.toString();
+
+    // SÉCURITÉ PRIX : Utiliser num?.toDouble() pour lire les doubles de SQLite
+    final safePrix = (map['prix'] as num?)?.toDouble();
+    final safePrixAchatUSD = (map['prixAchatUSD'] as num?)?.toDouble();
+    final safeFraisAchatUSD = (map['fraisAchatUSD'] as num?)?.toDouble();
+
     return Produit(
       localId: map['localId'] as int?,
-      nom: map['nom'] as String,
-      categorie: map['categorie'] as String?,
-      prix: (map['prix'] as num?)?.toDouble(),
+      nom: safeNom,
+      categorie: map['categorie'] as String?, // Une seule fois
+      prix: safePrix, // Une seule fois
       quantiteInitiale: map['quantiteInitiale'] as int?,
       quantiteActuelle: map['quantiteActuelle'] as int?,
       imagePath: map['imagePath'] as String?,
       idTransaction: map['idTransaction'] as int?,
       serverId: map['serverId'] as int?,
       syncStatus: map['syncStatus'] as String?,
-      // Récupération des nouveaux champs (avec valeur par défaut si non présent)
-      prixAchatUSD: (map['prixAchatUSD'] as num?)?.toDouble(),
-      fraisAchatUSD: (map['fraisAchatUSD'] as num?)?.toDouble(),
+      // Récupération des nouveaux champs (avec sécurité pour les numéros)
+      prixAchatUSD: safePrixAchatUSD,
+      fraisAchatUSD: safeFraisAchatUSD,
     );
   }
 }

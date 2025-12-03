@@ -1,37 +1,39 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:factura/DashboardVendor/historique_ventes.dart';
 import 'package:factura/DashboardVendor/pdf_preview.dart';
-import 'package:factura/pdf_generator_service.dart' as pdf_service;
-import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
-import 'package:factura/database/database_service.dart';
 import 'package:factura/Modeles/model_clients.dart';
 import 'package:factura/Modeles/model_produits.dart';
 import 'package:factura/Modeles/model_ventes.dart';
+import 'package:factura/database/database_service.dart';
+import 'package:factura/pdf_generator_service.dart' as pdf_service;
+import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart';
 
-/// MODELE PANIER
+// ⚠️ AJUSTER CES IMPORTS SELON VOTRE STRUCTURE DE DOSSIERS !
+
+
+// --- Modèles de support pour ce fichier (essentiel) ---
 class CartItem {
-  final Produit produit;
+  Produit produit;
   int quantity;
   CartItem({required this.produit, this.quantity = 1});
 }
 
-/// PAGE ENREGISTREMENT VENTE (avec recherche + suggestions)
+// --- CLASSE PRINCIPALE ---
 class EnregistrementVente extends StatefulWidget {
   const EnregistrementVente({super.key});
+
   @override
   State<EnregistrementVente> createState() => _EnregistrementVenteState();
 }
 
+
 class _EnregistrementVenteState extends State<EnregistrementVente> {
   final db = DatabaseService.instance;
-
   // Clients
   List<Client> clients = [];
   List<Client> filteredClients = [];
@@ -58,6 +60,10 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   // Mode de paiement par défaut
   String _modePaiement = 'CASH';
 
+  // 💰 NOUVEAU : Taux de change USD vers FC (chargé de la BDD)
+  double _currentExchangeRate = 0.0;
+
+
   // --- Initialisation et Nettoyage ---
 
   @override
@@ -65,6 +71,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     super.initState();
     loadClients();
     loadProducts();
+    // 💡 MODIFIÉ : Lance le chargement du compteur ET du taux
     _loadSalesCounter();
 
     clientSearchController.addListener(() {
@@ -88,8 +95,17 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     addressController.dispose();
     super.dispose();
   }
+  // 💰 NOUVEAU : Fonction pour charger le taux de la BDD
+  Future<void> _loadExchangeRate() async {
+    final realRate = await db.getLatestExchangeRate();
+    if (mounted) {
+      setState(() {
+        // Définit le taux réel ou 1.0 par défaut (USD = 1 FC) si le taux est inconnu
+        _currentExchangeRate = realRate ?? 1.0;
+      });
+    }
+  }
 
-  // --- Gestion du compteur (Simulation) ---
   Future<void> _loadSalesCounter() async {
     // Récupère le nombre de ventes déjà enregistrées pour initialiser le compteur
     final totalSales = await db.getTotalVentesCount();
@@ -98,8 +114,9 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
         _salesCounter = totalSales;
       });
     }
+    // 💡 AJOUT : Charge le taux de change juste après
+    await _loadExchangeRate();
   }
-
 
   // --- Chargement et Filtrage ---
 
@@ -249,13 +266,25 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     });
   }
 
-  // --- Calculs ---
-  double get total => cart.fold(0, (sum, item) => sum + (item.produit.prix ?? 0) * item.quantity);
-  // ⚙️ Votre logique de réduction : 8% du total brut
+  // --- Calculs (CORRIGÉ) ---
+
+  // 💰 NOUVEAU : Conversion du Prix de Vente USD en FC
+  double getPriceVenteFC(Produit produit) {
+    // produit.prix est le prix de vente en USD
+    // On multiplie par le taux chargé, ou par 1.0 si le taux est toujours à 0.0 (en attente)
+    return (produit.prix ?? 0.0) * (_currentExchangeRate > 0.0 ? _currentExchangeRate : 1.0);
+  }
+
+  // 💡 CORRIGÉ : Le total du panier utilise le prix de vente converti en FC
+  double get total => cart.fold(0, (sum, item) => sum + getPriceVenteFC(item.produit) * item.quantity);
+
+  // ⚙️ Votre logique de réduction : 6% du total brut
   double get discountAmount => total * 0.06;
   double get netToPay => total - discountAmount;
 
-  // --- Création vente / lignes ---
+  // --- Création vente / lignes (CORRIGÉ) ---
+
+  // Dans _EnregistrementVenteState.createVente
 
   Vente createVente({bool isDraft = false}) {
     // ⚙️ LOGIQUE POUR UN NUMÉRO SÉQUENTIEL SIMPLE (FV-001, FV-002...)
@@ -266,9 +295,14 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
       venteId: newVenteId,
       dateVente: DateTime.now().toIso8601String(),
       clientLocalId: selectedClient!.localId!,
-      vendeurNom: 'Vendeur', // À remplacer par le nom de l'utilisateur connecté
+      vendeurNom: 'Vendeur',
+
+      // ⭐️ CORRECTION : AJOUT DES DEUX CHAMPS MANQUANTS ⭐️
+      deviseTransaction: 'FC', // Devise de la transaction finale
+      tauxDeChange: _currentExchangeRate, // Le taux chargé de la BDD (même s'il est 1.0)
+
       totalBrut: total,
-      reductionPercent: discountAmount, // Stocke le montant de la réduction
+      reductionPercent: discountAmount,
       totalNet: netToPay,
       statut: isDraft ? 'brouillon' : 'validée',
     );
@@ -276,14 +310,17 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
 
   List<LigneVente> createLignes(Vente vente) {
     return cart.map((item) {
+      // 💡 NOUVEAU : Récupère le prix unitaire converti en FC
+      final prixUnitaireFC = getPriceVenteFC(item.produit);
+
       return LigneVente(
         ligneVenteId: const Uuid().v4(),
         venteLocalId: vente.localId ?? 0,
         produitLocalId: item.produit.localId!,
         nomProduit: item.produit.nom!,
-        prixVenteUnitaire: item.produit.prix ?? 0,
+        prixVenteUnitaire: prixUnitaireFC, // 💡 STOCKE LA VALEUR CONVERTIE EN FC
         quantite: item.quantity,
-        sousTotal: (item.produit.prix ?? 0) * item.quantity,
+        sousTotal: prixUnitaireFC * item.quantity, // 💡 CALCULE LE SOUS-TOTAL EN FC
       );
     }).toList();
   }
@@ -461,22 +498,67 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }
   }
 
+  // --- Widgets d'aide (Utilisent maintenant le taux FC) ---
+  // Dans la classe _EnregistrementVenteState
 
-  // --- Widgets d'aide ---
+  Widget _buildExchangeRateDisplay() {
+    // Affiche un indicateur de chargement si le taux est toujours à 0.0 (initialisation)
+    if (_currentExchangeRate == 0.0) {
+      return const Padding(
+        padding: EdgeInsets.only(right: 8.0),
+        child: SizedBox(
+          width: 15, height: 15,
+          child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+        ),
+      );
+    }
+
+    // Affiche le taux converti en entier
+    final rateText = _currentExchangeRate.toStringAsFixed(0);
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0), // Marge à droite pour le séparer du bouton Historique
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.blueGrey.shade800, // Fond foncé pour le contraste
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.currency_exchange, color: Colors.white, size: 16),
+            const SizedBox(width: 4),
+            // 💡 AMÉLIORÉ : Le texte est plus lisible
+            Text(
+              '$rateText FC / USD', // Affiche le taux FC pour 1 USD
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
   Widget _buildClientSuggestions(double maxHeight) {
     if (!_showClientSuggestions || filteredClients.isEmpty) {
       return const SizedBox.shrink();
     }
     final height = filteredClients.length > 6 ? maxHeight : filteredClients.length * 56.0;
-    // On conserve la structure de la suggestion pour qu'elle soit superposée et nette
+
     return Container(
       constraints: BoxConstraints(maxHeight: height),
       margin: const EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: Colors.blueGrey.shade200), // Bordure plus douce
+        border: Border.all(color: Colors.blueGrey.shade200),
         borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.1), blurRadius: 10)], // Ombre plus prononcée pour l'effet "flottant"
+        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.1), blurRadius: 10)],
       ),
       child: ListView.separated(
         shrinkWrap: true,
@@ -522,16 +604,21 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
         separatorBuilder: (_, __) => const Divider(height: 1, indent: 8, endIndent: 8),
         itemBuilder: (context, idx) {
           final p = filteredProducts[idx];
-          // Vérification du stock pour l'affichage (alerte orange si stock < 5, même si vente autorisée)
+          // Vérification du stock pour l'affichage
           final stockDispo = p.quantiteActuelle ?? 0;
           final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
           final stockText = stockDispo <= 0 ? 'RUPTURE' : 'Stock: $stockDispo';
           final isOutOfStock = stockDispo <= 0;
 
+          // 💰 NOUVEAU : Affichage du prix en USD pour l'information
+          final priceUSDText = p.prix?.toStringAsFixed(0) ?? '0';
+
+
           return ListTile(
             leading: p.imagePath != null && p.imagePath!.isNotEmpty ? SizedBox(width: 40, height: 40, child: Image.network(p.imagePath!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image))) : const Icon(Icons.inventory_2),
             title: Text(p.nom ?? ''),
-            subtitle: Text('Prix: ${p.prix?.toStringAsFixed(0) ?? '0'} FC - $stockText', style: TextStyle(color: stockColor, fontWeight: FontWeight.bold)),
+            // 💡 CORRIGÉ : Affichage du prix en USD pour l'information, car le prix stocké dans Produit est en USD
+            subtitle: Text('Prix: $priceUSDText USD - $stockText', style: TextStyle(color: stockColor, fontWeight: FontWeight.bold)),
             trailing: isOutOfStock ? const Icon(Icons.warning, color: Colors.red) : null,
             onTap: isOutOfStock ? null : () {
               addProductToCart(p);
@@ -548,7 +635,6 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      // Retiré la marge du bas ici pour mieux gérer l'espacement dans la Row
       margin: const EdgeInsets.all(0),
       child: Padding(
         padding: padding ?? const EdgeInsets.all(16.0),
@@ -607,7 +693,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
           ),
           const SizedBox(width: 10),
           Text(
-            '${amount.toStringAsFixed(0)} FC',
+            '${amount.toStringAsFixed(0)} FC', // 💡 CORRIGÉ : Montre toujours FC
             style: TextStyle(
               fontSize: isBig ? 22 : 16,
               fontWeight: FontWeight.bold,
@@ -622,7 +708,6 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   // WIDGET pour les boutons de validation (ancre fixe)
   Widget _buildValidationButtons(bool canValidate, Vente? vente, List<LigneVente>? lignes, Client? client) {
     return Container(
-      // Zone fixe en bas de l'écran, avec une ombre pour la surélever
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -686,7 +771,6 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    // On augmente un peu la taille du container pour mieux profiter de l'écran
     final containerWidth = screenWidth > 900 ? 900.0 : screenWidth * 0.95;
     final suggestionMaxHeight = 350.0;
 
@@ -702,11 +786,25 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Nouvelle Vente"),
+        // 💰 AJOUT : Affiche le taux de change
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(20.0),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 5.0, left: 16.0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              //child: _buildExchangeRateDisplay(),
+            ),
+          ),
+        ),
         centerTitle: true,
         backgroundColor: Colors.blueGrey,
         foregroundColor: Colors.white,
         elevation: 4,
         actions: [
+          // 💰 AFFICHAGE DU TAUX (CORRIGÉ)
+          _buildExchangeRateDisplay(),
+          // Bouton Historique des ventes
           IconButton(
             icon: const Icon(Icons.history, color: Colors.white),
             onPressed: () {
@@ -718,7 +816,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
             tooltip: "Historique des ventes",
           ),
         ],
-      ),
+      ), // 👈 C'est la parenthèse fermante de l'AppBar
       body: Container(
         color: Colors.blueGrey.shade50,
         child: Stack(
@@ -734,7 +832,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
 
-                        // 1. SECTION CLIENT
+                        // 1. SECTION CLIENT (Inchangée)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 10.0),
                           child: _buildSectionCard(
@@ -796,8 +894,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
                           ),
                         ),
 
-                        // NOUVEAU BLOC: Sections 2 et 3 sur la même ligne (Row)
-                        // On n'applique pas de Row sur les petits écrans pour rester lisible (mobile-first)
+                        // 2. & 3. SECTION PAIEMENT et PRODUITS (Inchangées)
                         LayoutBuilder(
                           builder: (context, constraints) {
                             if (constraints.maxWidth < 600) {
@@ -945,7 +1042,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
                           },
                         ),
 
-                        // 4. SECTION PANIER et TOTAUX
+                        // 4. SECTION PANIER et TOTAUX (CORRIGÉ)
                         _buildSectionCard(
                           title: '4. Panier et Totaux',
                           content: Column(
@@ -959,21 +1056,32 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
                                   headingRowColor: MaterialStateProperty.all(Colors.blueGrey.shade50),
                                   columns: const [
                                     DataColumn(label: Text("Produit", style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text("Prix", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("Prix (FC)", style: TextStyle(fontWeight: FontWeight.bold))), // 💡 EN-TÊTE CORRIGÉ
                                     DataColumn(label: Text("Stock", style: TextStyle(fontWeight: FontWeight.bold))),
                                     DataColumn(label: Text("Qté", style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text("S.total", style: TextStyle(fontWeight: FontWeight.bold))),
+                                    DataColumn(label: Text("S.total (FC)", style: TextStyle(fontWeight: FontWeight.bold))), // 💡 EN-TÊTE CORRIGÉ
                                     DataColumn(label: Text("Actions", style: TextStyle(fontWeight: FontWeight.bold))),
                                   ],
                                   rows: cart.map((item) {
                                     final stockDispo = item.produit.quantiteActuelle ?? 0;
                                     final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
+
+                                    // 💡 NOUVEAU : Calculs basés sur la conversion
+                                    final priceVenteFC = getPriceVenteFC(item.produit);
+                                    final sousTotalFC = priceVenteFC * item.quantity;
+
                                     return DataRow(cells: [
                                       DataCell(Text(item.produit.nom ?? '', style: const TextStyle(fontWeight: FontWeight.w500))),
-                                      DataCell(Text("${item.produit.prix?.toStringAsFixed(0) ?? '0'} F")),
+
+                                      // 💡 CORRIGÉ : Utilise le prix converti en FC
+                                      DataCell(Text("${priceVenteFC.toStringAsFixed(0)} F")),
+
                                       DataCell(Text(stockDispo.toString(), style: TextStyle(color: stockColor, fontWeight: FontWeight.bold))),
                                       DataCell(Text("${item.quantity}")),
-                                      DataCell(Text("${((item.produit.prix ?? 0) * item.quantity).toStringAsFixed(0)} F", style: const TextStyle(fontWeight: FontWeight.bold))),
+
+                                      // 💡 CORRIGÉ : Utilise le sous-total converti en FC
+                                      DataCell(Text("${sousTotalFC.toStringAsFixed(0)} F", style: const TextStyle(fontWeight: FontWeight.bold))),
+
                                       DataCell(Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -985,12 +1093,11 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
                                               onPressed: () => updateQuantity(item, -1),
                                             ),
                                           ),
-                                          // Bouton d'ajout (avec vérification stock pour +1)
+                                          // Bouton d'ajout
                                           SizedBox(
                                             width: 32, height: 32,
                                             child: IconButton(
                                               icon: const Icon(Icons.add, size: 18),
-                                              // Autoriser l'ajout tant que la quantité actuelle est strictement inférieure au stock disponible
                                               onPressed: item.quantity < stockDispo ? () => updateQuantity(item, 1) : null,
                                               color: item.quantity < stockDispo ? Colors.green : Colors.grey,
                                             ),
@@ -1027,7 +1134,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
               ),
             ),
 
-            // 2. Barre d'actions fixe (Positionnée en bas)
+            // 2. Barre d'actions fixe (Inchangée)
             Positioned(
               bottom: 0,
               left: 0,
