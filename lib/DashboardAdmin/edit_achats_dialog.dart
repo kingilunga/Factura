@@ -1,13 +1,15 @@
-// Fichier: AchatEditDialog.dart
+// Fichier: AchatEditDialog.dart (VERSION FINALE ET CORRIGÉE)
 
+import 'package:factura/achats_produit_service.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/Modeles/model_achat_produits.dart';
-import 'package:factura/database/database_service.dart';
 import 'package:intl/intl.dart';
+
+// Supposons que AchatsProduitService contienne maintenant la logique de sécurité et la MAJ du produit
 
 class AchatEditDialog extends StatefulWidget {
   final AchatsProduit achat;
-  final Function() onAchatUpdated; // Callback pour recharger les données
+  final Function() onAchatUpdated;
 
   const AchatEditDialog({
     Key? key,
@@ -20,10 +22,11 @@ class AchatEditDialog extends StatefulWidget {
 }
 
 class _AchatEditDialogState extends State<AchatEditDialog> {
-  final DatabaseService dbService = DatabaseService.instance;
+
+  final AchatsProduitService _achatService = AchatsProduitService.instance;
   final _formKey = GlobalKey<FormState>();
 
-  // Contrôleurs pour les champs modifiables
+  // Contrôleurs de la TRANSACTION D'ACHAT (Existants)
   late TextEditingController _quantiteController;
   late TextEditingController _prixAchatController;
   late TextEditingController _fraisAchatController;
@@ -31,22 +34,51 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
   late DateTime _selectedDateAchat;
   late DateTime? _selectedDatePeremption;
 
-  // Stocke la quantité initiale pour le calcul de la différence de stock
+  // NOUVEAUX CONTRÔLEURS DE LA FICHE PRODUIT
+  late TextEditingController _nomProduitController;
+  late TextEditingController _categorieController;
+
+  // VARIABLES DE CONTRÔLE
   late int _ancienneQuantite;
+  bool _isLoading = true;
+  bool _venteExiste = false; // Indicateur de sécurité
 
   @override
   void initState() {
     super.initState();
-    // Initialisation des contrôleurs avec les valeurs existantes
+    // Initialisation des contrôleurs de la transaction
     _ancienneQuantite = widget.achat.quantiteAchetee;
     _quantiteController = TextEditingController(text: widget.achat.quantiteAchetee.toString());
     _prixAchatController = TextEditingController(text: widget.achat.prixAchatUnitaire.toString());
     _fraisAchatController = TextEditingController(text: widget.achat.fraisAchatUnitaire.toString());
     _prixVenteController = TextEditingController(text: widget.achat.prixVente.toString());
 
-    // Assurez-vous que les dates sont initialisées correctement
+    // Initialisation des contrôleurs de la FICHE PRODUIT
+    _nomProduitController = TextEditingController(text: widget.achat.nomProduit);
+    _categorieController = TextEditingController(text: widget.achat.type);
+
     _selectedDateAchat = widget.achat.dateAchat;
     _selectedDatePeremption = widget.achat.datePeremption;
+
+    _loadSecurityData(); // Lancer la vérification de sécurité
+  }
+
+  // MÉTHODE DE CHARGEMENT ET DE SÉCURITÉ
+  Future<void> _loadSecurityData() async {
+    try {
+      final bool existe = await _achatService.produitADejaEteVendu(widget.achat.produitLocalId);
+      if (mounted) {
+        setState(() {
+          _venteExiste = existe;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Erreur de chargement des données de sécurité: $e");
+      if (mounted) {
+        setState(() { _isLoading = false; });
+      }
+    }
   }
 
   @override
@@ -55,6 +87,8 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
     _prixAchatController.dispose();
     _fraisAchatController.dispose();
     _prixVenteController.dispose();
+    _nomProduitController.dispose();
+    _categorieController.dispose();
     super.dispose();
   }
 
@@ -66,47 +100,71 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
     }
 
     final int nouvelleQuantite = int.parse(_quantiteController.text);
-    final double nouvelleMarge = (double.parse(_prixVenteController.text) -
-        double.parse(_prixAchatController.text) -
-        double.parse(_fraisAchatController.text));
+    final double prixAchat = double.parse(_prixAchatController.text);
+    final double fraisAchat = double.parse(_fraisAchatController.text);
+    final double nouveauPrixVente = double.parse(_prixVenteController.text);
 
-    // 1. Créer les nouvelles données de la ligne d'achat (pour la table achats_produit)
-    final nouvellesDonneesAchat = {
+    // Calculs de marge
+    final double margeBrute = nouveauPrixVente - prixAchat - fraisAchat;
+    final double coutUnitaire = prixAchat + fraisAchat;
+    final double margeBeneficiairePercent = coutUnitaire > 0
+        ? (margeBrute / coutUnitaire) * 100
+        : 0.0;
+
+    // 1. Données de la FICHE PRODUIT
+    final Map<String, dynamic> nouvellesDonneesProduit = {
+      'nom': _nomProduitController.text,
+      'categorie': _categorieController.text,
+    };
+
+    // 2. Données de la LIGNE D'ACHAT
+    final Map<String, dynamic> nouvellesDonneesAchat = {
       'quantiteAchetee': nouvelleQuantite,
-      'prixAchatUnitaire': double.parse(_prixAchatController.text),
-      'fraisAchatUnitaire': double.parse(_fraisAchatController.text),
-      'prixVente': double.parse(_prixVenteController.text),
-      'margeBeneficiaire': nouvelleMarge, // Recalculé
+      'prixAchatUnitaire': prixAchat,
+      'fraisAchatUnitaire': fraisAchat,
+      'prixVente': nouveauPrixVente,
+      'margeBeneficiaire': double.parse(margeBeneficiairePercent.toStringAsFixed(2)),
       'dateAchat': _selectedDateAchat.toIso8601String(),
-      // Gérer la péremption qui peut être nulle
       'datePeremption': _selectedDatePeremption?.toIso8601String(),
     };
 
     try {
-      // 2. Appel à la fonction transactionnelle du service
-      await dbService.modifierAchatEtAjusterStock(
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Modification en cours...")),
+      );
+
+      // ÉTAPE 1 : MISE À JOUR DE LA FICHE PRODUIT (Nom/Catégorie)
+      await _achatService.updateProduitFiche(
+        produitId: widget.achat.produitLocalId,
+        nouvellesDonnees: nouvellesDonneesProduit,
+      );
+
+      // ÉTAPE 2 : MISE À JOUR DE LA TRANSACTION ET DU STOCK
+      await _achatService.modifierAchatEtAjusterStock(
         achatId: widget.achat.localId!,
-        produitId: widget.achat.produitLocalId, // ID du produit
-        ancienneQuantite: _ancienneQuantite, // Ancienne quantité lue à l'ouverture du dialogue
+        produitId: widget.achat.produitLocalId,
+        devise: widget.achat.devise,
+        ancienneQuantite: _ancienneQuantite,
         nouvelleQuantite: nouvelleQuantite,
         nouvellesDonneesAchat: nouvellesDonneesAchat,
       );
 
-      widget.onAchatUpdated(); // Déclenche le rechargement dans la page parente
-      if (mounted) Navigator.of(context).pop(); // Fermer la boîte de dialogue
+      widget.onAchatUpdated();
+      if (mounted) Navigator.of(context).pop();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Achat modifié et stock ajusté avec succès.')),
+        const SnackBar(content: Text('✅ Achat et Fiche Produit modifiés avec succès.'), backgroundColor: Colors.green),
       );
 
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur de modification: $e')),
+        SnackBar(content: Text('❌ Erreur de modification: ${e.toString()}'), backgroundColor: Colors.red),
       );
+      debugPrint("Erreur de modification d'achat: $e");
     }
   }
 
-  // --- WIDGETS DE SÉLECTION DE DATE (inchangé) ---
+  // --- WIDGETS DE SÉLECTION DE DATE (fonctions manquantes ajoutées) ---
 
   Future<void> _selectDateAchat(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
@@ -136,23 +194,49 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return AlertDialog(
       title: Text("Modifier Achat : ${widget.achat.nomProduit}"),
-      content: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: SizedBox(
-            width: 500,
+
+      // ⭐️ CORRECTION AFFICHAGE : Utilisation de ConstrainedBox pour éviter l'overflow ⭐️
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          // Limite la hauteur maximale du contenu à 60% de la hauteur de l'écran.
+          maxHeight: MediaQuery.of(context).size.height * 0.6,
+        ),
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
             child: Column(
-              mainAxisSize: MainAxisSize.min, // 🚀 CORRECTION APPLIQUÉE ICI
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                // Informations clés (Non modifiables ici)
+                // --- Fiche Produit ---
+                const Text('Fiche Produit', style: TextStyle(fontWeight: FontWeight.bold)),
+                TextFormField(
+                  controller: _nomProduitController,
+                  decoration: const InputDecoration(labelText: 'Nom du Produit'),
+                  validator: (value) => (value == null || value.isEmpty) ? 'Le nom est obligatoire.' : null,
+                ),
+                TextFormField(
+                  controller: _categorieController,
+                  decoration: const InputDecoration(labelText: 'Catégorie'),
+                  validator: (value) => (value == null || value.isEmpty) ? 'La catégorie est obligatoire.' : null,
+                ),
+
+                const Divider(),
+                const Text('Détails de la Transaction', style: TextStyle(fontWeight: FontWeight.bold)),
+
+                // Informations clés (Lecture Seule)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text("Fournisseur: ${widget.achat.nomFournisseur}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text("Type: ${widget.achat.type} | ID Produit: ${widget.achat.produitLocalId}"),
+                  subtitle: Text("ID Produit: ${widget.achat.produitLocalId}"),
                 ),
 
                 const Divider(),
@@ -172,19 +256,35 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
                 TextFormField(
                   controller: _prixAchatController,
                   decoration: InputDecoration(labelText: 'Prix Achat Unitaire', suffixText: widget.achat.devise),
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   validator: (value) => (value == null || double.tryParse(value) == null) ? 'Prix invalide.' : null,
                 ),
+
+                // 🛡️ CHAMP PRIX DE VENTE SÉCURISÉ 🛡️
                 TextFormField(
                   controller: _prixVenteController,
-                  decoration: InputDecoration(labelText: 'Prix Vente (Unitaire)', suffixText: widget.achat.devise),
-                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Prix Vente (Unitaire)',
+                    suffixText: widget.achat.devise,
+                    suffixIcon: _venteExiste
+                        ? const Icon(Icons.lock, color: Colors.red)
+                        : null,
+                    hintText: _venteExiste
+                        ? "Prix bloqué (ventes existantes)."
+                        : "Modifiable.",
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  readOnly: _venteExiste, // Blocage si des ventes existent
+                  style: TextStyle(
+                    color: _venteExiste ? Colors.grey : Colors.black,
+                  ),
                   validator: (value) => (value == null || double.tryParse(value) == null) ? 'Prix de vente invalide.' : null,
                 ),
+
                 TextFormField(
                   controller: _fraisAchatController,
                   decoration: InputDecoration(labelText: 'Frais Achat Unitaire', suffixText: widget.achat.devise),
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 ),
 
                 const SizedBox(height: 10),
@@ -225,7 +325,7 @@ class _AchatEditDialogState extends State<AchatEditDialog> {
         ElevatedButton.icon(
           icon: const Icon(Icons.save),
           label: const Text('Enregistrer'),
-          onPressed: _saveAchat, // ⭐️ Connexion à la fonction de sauvegarde transactionnelle
+          onPressed: _saveAchat, // Connexion à la fonction de sauvegarde transactionnelle
         ),
       ],
     );

@@ -61,6 +61,7 @@ dependencies:
   js: ^0.6.3
  # flutter_secure_storage_macos: ^4.0.0
   flutter_meta_sdk: ^1.0.5
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
@@ -95,6 +96,13 @@ flutter:
     - assets/images/Icon_FacturaVision.png
     - assets/animations/boules_align.json
     - assets/animations/loading.json
+    - assets/images/familia.png
+    - assets/images/devPhoto.png
+    - assets/images/shopjeadot.png
+
+    - assets/Fonts/robotto/
+    - assets/Icons/whatsapp-logo-icon.png
+    - assets/Icons/email-app-icon.png
 
 
   #  - assets/md/barre_cercul.json
@@ -113,11 +121,12 @@ flutter:
   # "family" key with the font family name, and a "fonts" key with a
   # list giving the asset and other descriptors for the font. For
   # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
+  fonts:
+      - family: Roboto
+        fonts:
+          - asset: assets/Fonts/robotto/Roboto-Regular.ttf
+          - asset: assets/Fonts/robotto/Roboto-Bold.ttf
+            weight: 700
   #         style: italic
   #   - family: Trajan Pro
   #     fonts:

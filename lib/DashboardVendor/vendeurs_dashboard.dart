@@ -1,10 +1,9 @@
 import 'package:factura/DashboardVendor/afficher_clients.dart';
-import 'package:factura/DashboardVendor/ajout_produitsPage.dart';
 import 'package:factura/DashboardVendor/enregistrement_proformas.dart';
-import 'package:factura/DashboardVendor/gestion_produitsPage.dart';
+import 'package:factura/DashboardVendor/historique_ventes.dart';
+import 'package:factura/DashboardVendor/stock_produitsPage.dart';
 import 'package:factura/DashboardVendor/statistiques.dart';
 import 'package:factura/DashboardVendor/ventes.dart'; // Alias: EnregistrementVente
-// [AJOUT] Import de la page Pro-Forma
 import 'package:flutter/material.dart';
 import 'package:factura/Splash_login/connexion.dart';
 import 'package:factura/Modeles/model_utilisateurs.dart';
@@ -33,13 +32,13 @@ class _VendeurDashboardPageState extends State<VendeursDashboardPage> {
 
   // [MODIFICATION] Mise à jour de la liste des titres
   final List<String> _sectionsTitles = [
-    "Tableau de bord du vendeur", // Index 0
-    "Ajout des Produits",         // Index 1
-    "Nos Clients",                // Index 2
-    "Ventes produits",            // Index 3
-    "Factures Pro-Forma",         // Index 4 (NOUVEAU)
-    "Stock produits",             // Index 5 (Décalé)
-    "Rapports détaillés"          // Index 6 (Décalé)
+    "Tableau de bord",    // 0
+    "Nos Clients",        // 1
+    "Ventes produits",    // 2
+    "Factures Pro-Forma", // 3
+    "Stock produits",     // 4
+    "Rapports détaillés",  // 5
+    "Historique de ventes" // 6
   ];
 
   // 💡 TEMPORAIRE : ID du vendeur
@@ -47,20 +46,13 @@ class _VendeurDashboardPageState extends State<VendeursDashboardPage> {
 
   // [MODIFICATION] Mise à jour de la liste des Widgets
   late final List<Widget> _sectionsContent = [
-    // 0. Statistiques
-    Statistiques(onNavigate: _changePage, currentVendeurId: currentVendeurId),
-    // 1. Ajout Produits
-    const AjoutProduitsPage(),
-    // 2. Clients
-    const AfficherClientsPage(),
-    // 3. Ventes (Facturation)
-    const EnregistrementVente(),
-    // 4. [NOUVEAU] Pro-Forma
-    const EnregistrementProForma(),
-    // 5. Stock (Décalé)
-    const GestionStockProduitsVendor(),
-    // 6. Rapports (Décalé)
-    const Rapports(typeDocument: '',),
+    Statistiques(onNavigate: _changePage, currentVendeurId: currentVendeurId), // 0
+    const AfficherClientsPage(),                                               // 1
+    EnregistrementVente(onNavigate: _changePage),                              // 2
+    const EnregistrementProForma(),                                            // 3
+    const StockProduits(),                                                     // 4
+    const Rapports(typeDocument: 'GLOBAL'),                                    // 5
+    const HistoriqueVentes(typeDocument: 'VENTE'),                             // 6
   ];
 
   void _deconnexion() {
@@ -186,13 +178,13 @@ class _VendeurDashboardPageState extends State<VendeursDashboardPage> {
   // [MODIFICATION] Mise à jour des icônes pour correspondre aux nouveaux index
   Icon _getIconForIndex(int index) {
     switch(index) {
-      case 0: return const Icon(Icons.dashboard);
-      case 1: return const Icon(Icons.add);
-      case 2: return const Icon(Icons.people);
-      case 3: return const Icon(Icons.point_of_sale);
-      case 4: return const Icon(Icons.description); // Icône Pro-Forma (Index 4)
-      case 5: return const Icon(Icons.inventory);   // Icône Stock (Index 5)
-      case 6: return const Icon(Icons.analytics);   // Icône Rapports (Index 6)
+      case 0: return const Icon(Icons.dashboard); // 0
+      case 1: return const Icon(Icons.people);    // 1
+      case 2: return const Icon(Icons.shopping_cart); // 2 Ventes (Vendre des produits)
+      case 3: return const Icon(Icons.description);   // 3 Pro-Forma
+      case 4: return const Icon(Icons.inventory);     // 4 Stock
+      case 5: return const Icon(Icons.analytics);     // 5 Rapports
+      case 6: return const Icon(Icons.history);       // 6 Historique
       default: return const Icon(Icons.help);
     }
   }

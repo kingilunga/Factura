@@ -9,11 +9,6 @@ import 'package:sqflite/sqflite.dart';
 // =================================================================
 // --- MODÈLES MINIMAUX ET SERVICES (À IMPORTER DANS VOTRE PROJET RÉEL) ---
 
-// =================================================================
-// --- SERVICE LOCAL (Logique Transactionnelle Mise à Jour) ---
-// Assurez-vous que les noms des tables (produitsTable, achatsProduitTable)
-// sont correctement définis dans votre DatabaseService.
-// =================================================================
 class AchatsProduitService {
   static final AchatsProduitService instance = AchatsProduitService._init();
   AchatsProduitService._init();
@@ -536,8 +531,6 @@ class _AchatsProduitsPageState extends State<AchatsProduitsPage> {
                     ),
                   ],
                 ),
-
-              // ----------------------------------------------------------------------------------
               // =========================================================
               // ✅ AUTOCOMPLÉTION PRODUIT (Code Réel Corrigé et Sécurisé)
               // =========================================================

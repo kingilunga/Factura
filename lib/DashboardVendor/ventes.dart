@@ -13,9 +13,6 @@ import 'package:flutter/foundation.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
 
-// ⚠️ AJUSTER CES IMPORTS SELON VOTRE STRUCTURE DE DOSSIERS !
-
-
 // --- Modèles de support pour ce fichier (essentiel) ---
 class CartItem {
   Produit produit;
@@ -25,12 +22,16 @@ class CartItem {
 
 // --- CLASSE PRINCIPALE ---
 class EnregistrementVente extends StatefulWidget {
-  const EnregistrementVente({super.key});
+  // 1. On déclare la fonction comme une variable obligatoire
+  final Function(int) onNavigate;
+
+  // 2. On l'ajoute au constructeur (on retire le "void onNavigate" en bas)
+  const EnregistrementVente({super.key, required this.onNavigate});
+
 
   @override
   State<EnregistrementVente> createState() => _EnregistrementVenteState();
 }
-
 
 class _EnregistrementVenteState extends State<EnregistrementVente> {
   final db = DatabaseService.instance;
@@ -39,6 +40,8 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   List<Client> filteredClients = [];
   Client? selectedClient;
   final TextEditingController clientSearchController = TextEditingController();
+  // 🎯 AJOUT ICI : Le contrôleur pour la remise
+  final TextEditingController _remiseController = TextEditingController(text: "0");
   bool _showClientSuggestions = false;
 
   // Nouveau client
@@ -63,9 +66,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   // 💰 NOUVEAU : Taux de change USD vers FC (chargé de la BDD)
   double _currentExchangeRate = 0.0;
 
-
   // --- Initialisation et Nettoyage ---
-
   @override
   void initState() {
     super.initState();
@@ -88,6 +89,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
 
   @override
   void dispose() {
+    _remiseController.dispose();
     clientSearchController.dispose();
     productSearchController.dispose();
     nameController.dispose();
@@ -119,7 +121,6 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   // --- Chargement et Filtrage ---
-
   Future<void> loadClients() async {
     final loaded = await db.getAllClients();
     if (!mounted) return;
@@ -153,7 +154,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }
 
     final results = clients.where((c) {
-      final name = (c.nomClient ?? '').toLowerCase();
+      final name = (c.nomClient ).toLowerCase();
       final phone = (c.telephone ?? '').toLowerCase();
       return name.contains(q) || phone.contains(q);
     }).toList();
@@ -175,7 +176,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     }
 
     final results = produits.where((p) {
-      final name = (p.nom ?? '').toLowerCase();
+      final name = (p.nom ).toLowerCase();
       final cat = (p.categorie ?? '').toLowerCase();
       return name.contains(q) || cat.contains(q);
     }).toList();
@@ -187,7 +188,6 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   // --- Logique Panier et Client ---
-
   Future<void> addClient() async {
     final name = nameController.text.trim();
     if (name.isEmpty) return;
@@ -266,23 +266,20 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     });
   }
 
-  // --- Calculs (CORRIGÉ) ---
-
   // 💰 NOUVEAU : Conversion du Prix de Vente USD en FC
   double getPriceVenteFC(Produit produit) {
     // produit.prix est le prix de vente en USD
     // On multiplie par le taux chargé, ou par 1.0 si le taux est toujours à 0.0 (en attente)
     return (produit.prix ?? 0.0) * (_currentExchangeRate > 0.0 ? _currentExchangeRate : 1.0);
   }
-
-  // 💡 CORRIGÉ : Le total du panier utilise le prix de vente converti en FC
+  // ✅ Remplace le bloc du haut par celui-ci :
   double get total => cart.fold(0, (sum, item) => sum + getPriceVenteFC(item.produit) * item.quantity);
-
-  // ⚙️ Votre logique de réduction : 6% du total brut
-  double get discountAmount => total * 0.06;
+// 🎯 On lie enfin discountAmount à ton champ de texte (pourcentage)
+  double get discountAmount {
+    double pourcent = double.tryParse(_remiseController.text) ?? 0.0;
+    return total * (pourcent / 100);
+  }
   double get netToPay => total - discountAmount;
-
-  // --- Création vente / lignes (CORRIGÉ) ---
 
   // Dans _EnregistrementVenteState.createVente
 
@@ -296,9 +293,9 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
       dateVente: DateTime.now().toIso8601String(),
       clientLocalId: selectedClient!.localId!,
       vendeurNom: 'Vendeur',
-
       // ⭐️ CORRECTION : AJOUT DES DEUX CHAMPS MANQUANTS ⭐️
       deviseTransaction: 'FC', // Devise de la transaction finale
+      modePaiement: _modePaiement, // 🎯 LIAISON DE LA VARIABLE D'ÉTAT !
       tauxDeChange: _currentExchangeRate, // Le taux chargé de la BDD (même s'il est 1.0)
 
       totalBrut: total,
@@ -481,13 +478,12 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
 
     // On imprime la version THERMIQUE stabilisée
     await printOrPreviewThermalPdf(vente, lignes, client);
-
-
     // 4. Réinitialisation
     if (mounted) {
       setState(() {
         cart.clear();
         selectedClient = null;
+        _modePaiement = 'CASH'; // 👈 AJOUTEZ CETTE LIGNE ICI
         _showClientSuggestions = false;
         _showProductSuggestions = false;
         clientSearchController.clear();
@@ -497,9 +493,7 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
           const SnackBar(content: Text("Vente validée et Reçu Thermique imprimé !")));
     }
   }
-
   // --- Widgets d'aide (Utilisent maintenant le taux FC) ---
-  // Dans la classe _EnregistrementVenteState
 
   Widget _buildExchangeRateDisplay() {
     // Affiche un indicateur de chargement si le taux est toujours à 0.0 (initialisation)
@@ -544,37 +538,32 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
     );
   }
 
-
   Widget _buildClientSuggestions(double maxHeight) {
-    if (!_showClientSuggestions || filteredClients.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    final height = filteredClients.length > 6 ? maxHeight : filteredClients.length * 56.0;
+    if (!_showClientSuggestions || filteredClients.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      constraints: BoxConstraints(maxHeight: height),
-      margin: const EdgeInsets.only(top: 8),
+      constraints: BoxConstraints(maxHeight: maxHeight),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: Colors.blueGrey.shade200),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.1), blurRadius: 10)],
+        border: Border.all(color: Colors.blueGrey.shade100),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
       ),
-      child: ListView.separated(
+      child: ListView.builder(
         shrinkWrap: true,
+        padding: EdgeInsets.zero,
         itemCount: filteredClients.length,
-        separatorBuilder: (_, __) => const Divider(height: 1, indent: 8, endIndent: 8),
         itemBuilder: (context, idx) {
           final c = filteredClients[idx];
           return ListTile(
-            title: Text(c.nomClient ?? 'Client sans nom'),
-            subtitle: Text(c.telephone ?? 'N/A'),
+            dense: true, // 👈 Ligne plus fine
+            visualDensity: VisualDensity.compact,
+            title: Text(c.nomClient ?? '', style: const TextStyle(fontSize: 13)),
+            subtitle: Text(c.telephone ?? '', style: const TextStyle(fontSize: 11)),
             onTap: () {
               setState(() {
                 selectedClient = c;
                 clientSearchController.text = c.nomClient ?? '';
                 _showClientSuggestions = false;
-                filteredClients = List<Client>.from(clients);
               });
             },
           );
@@ -658,492 +647,478 @@ class _EnregistrementVenteState extends State<EnregistrementVente> {
   }
 
   // WIDGET: afficher les totaux
-  Widget _buildTotalsDisplay(Vente? vente) {
-    if (vente == null) {
-      return const Center(child: Text("Ajouter des articles pour voir les totaux.", style: TextStyle(fontSize: 16, color: Colors.grey)));
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
+
+  Widget _buildTotalLine(String label, double amount, Color color, bool isBig) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        // Total Brut
-        _buildTotalLine("Total Brut", total, Colors.blueGrey.shade700, false),
-        // Réduction
-        _buildTotalLine("Réduction (6%)", vente.reductionPercent, Colors.red, false),
-        const Divider(color: Colors.black, thickness: 1.5, height: 10),
-        // Total Net
-        _buildTotalLine("TOTAL À PAYER", vente.totalNet, Colors.green.shade700, true),
+        Text(label, style: TextStyle(fontSize: isBig ? 16 : 13, fontWeight: isBig ? FontWeight.bold : FontWeight.normal)),
+        Text(
+          '${amount.toStringAsFixed(0)} FC',
+          style: TextStyle(fontSize: isBig ? 18 : 14, fontWeight: FontWeight.bold, color: color),
+        ),
       ],
     );
   }
 
-  // Widget utilitaire pour une ligne de total
-  Widget _buildTotalLine(String label, double amount, Color color, bool isBig) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Text(
-            '$label :',
-            style: TextStyle(
-              fontSize: isBig ? 20 : 16,
-              fontWeight: isBig ? FontWeight.bold : FontWeight.normal,
-              color: color,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            '${amount.toStringAsFixed(0)} FC', // 💡 CORRIGÉ : Montre toujours FC
-            style: TextStyle(
-              fontSize: isBig ? 22 : 16,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // WIDGET pour les boutons de validation (ancre fixe)
   Widget _buildValidationButtons(bool canValidate, Vente? vente, List<LigneVente>? lignes, Client? client) {
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 15,
-            offset: const Offset(0, -5), // Ombre vers le haut
-          ),
-        ],
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)],
       ),
-      padding: const EdgeInsets.only(top: 15, bottom: 25, left: 16, right: 16),
-      width: double.infinity,
-      child: SafeArea( // S'assure de ne pas chevaucher les barres de navigation du système
-        child: Center(
-          child: ConstrainedBox( // Limite la largeur des boutons sur grand écran
-            constraints: const BoxConstraints(maxWidth: 800),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Bouton 1: Aperçu A4
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.print),
-                    label: const Text("Aperçu Facture", overflow: TextOverflow.ellipsis),
-                    onPressed: canValidate ? () => _previewPdf(vente!, lignes!, client!) : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.indigo,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
-                      textStyle: const TextStyle(fontSize: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Bouton 2: Valider et Imprimer (Action Principale)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text("VALIDER ET IMPRIMER LA VENTE", overflow: TextOverflow.ellipsis),
-                    onPressed: canValidate ? validateSale : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade600,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 15),
-                      textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 6,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final containerWidth = screenWidth > 900 ? 900.0 : screenWidth * 0.95;
-    final suggestionMaxHeight = 350.0;
-
-    // Détermination de l'état de validation
-    final canValidate = selectedClient != null && cart.isNotEmpty;
-    final tempVente = canValidate ? createVente(isDraft: true) : null;
-    final tempLignes = canValidate ? createLignes(tempVente!) : null;
-    final client = selectedClient;
-
-    // Hauteur estimée de la barre d'actions fixes + padding
-    const double fixedButtonHeight = 110.0;
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Nouvelle Vente"),
-        // 💰 AJOUT : Affiche le taux de change
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(20.0),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 5.0, left: 16.0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              //child: _buildExchangeRateDisplay(),
-            ),
-          ),
-        ),
-        centerTitle: true,
-        backgroundColor: Colors.blueGrey,
-        foregroundColor: Colors.white,
-        elevation: 4,
-        actions: [
-          // 💰 AFFICHAGE DU TAUX (CORRIGÉ)
-          _buildExchangeRateDisplay(),
-          // Bouton Historique des ventes
-          IconButton(
-            icon: const Icon(Icons.history, color: Colors.white),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const HistoriqueVentes()),
-              );
-            },
-            tooltip: "Historique des ventes",
-          ),
-        ],
-      ), // 👈 C'est la parenthèse fermante de l'AppBar
-      body: Container(
-        color: Colors.blueGrey.shade50,
-        child: Stack(
+      child: SafeArea(
+        child: Row(
           children: [
-            // 1. Contenu défilant
-            Positioned.fill(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, fixedButtonHeight),
-                child: Center(
-                  child: SizedBox(
-                    width: containerWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-
-                        // 1. SECTION CLIENT (Inchangée)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10.0),
-                          child: _buildSectionCard(
-                            title: '1. Sélectionner ou ajouter un Client',
-                            content: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // Champ de recherche Client
-                                TextField(
-                                  controller: clientSearchController,
-                                  decoration: InputDecoration(
-                                    prefixIcon: const Icon(Icons.search),
-                                    hintText: selectedClient == null ? 'Rechercher un client (nom ou téléphone)' : selectedClient!.nomClient,
-                                    border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                                    suffixIcon: selectedClient != null ? IconButton(
-                                      icon: const Icon(Icons.clear, color: Colors.red),
-                                      onPressed: () {
-                                        setState(() {
-                                          selectedClient = null;
-                                          clientSearchController.clear();
-                                          _showClientSuggestions = false;
-                                        });
-                                      },
-                                    ) : null,
-                                  ),
-                                  onChanged: filterClients,
-                                  onTap: () {
-                                    if (clientSearchController.text.isNotEmpty) setState(() => _showClientSuggestions = true);
-                                  },
-                                ),
-                                // suggestions
-                                _buildClientSuggestions(suggestionMaxHeight),
-                                const SizedBox(height: 8),
-
-                                // NOUVEAU CLIENT toggle
-                                TextButton.icon(
-                                  icon: Icon(showNewClientForm ? Icons.close : Icons.person_add, color: Colors.blue),
-                                  label: Text(showNewClientForm ? "Annuler l'ajout d'un client" : "Ajouter un nouveau client", style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
-                                  onPressed: () => setState(() => showNewClientForm = !showNewClientForm),
-                                ),
-
-                                if (showNewClientForm) ...[
-                                  const SizedBox(height: 12),
-                                  TextField(controller: nameController, decoration: InputDecoration(labelText: "Nom du client", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
-                                  const SizedBox(height: 8),
-                                  TextField(controller: phoneController, decoration: InputDecoration(labelText: "Téléphone", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))), keyboardType: TextInputType.phone),
-                                  const SizedBox(height: 8),
-                                  TextField(controller: addressController, decoration: InputDecoration(labelText: "Adresse", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)))),
-                                  const SizedBox(height: 16),
-                                  Align(alignment: Alignment.centerRight, child: ElevatedButton.icon(
-                                    icon: const Icon(Icons.check),
-                                    label: const Text("Ajouter client"),
-                                    onPressed: addClient,
-                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                                  )),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // 2. & 3. SECTION PAIEMENT et PRODUITS (Inchangées)
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            if (constraints.maxWidth < 600) {
-                              // Affichage en colonne pour les petits écrans
-                              return Column(
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 10.0),
-                                    child: _buildSectionCard(
-                                      title: '2. Mode de Paiement',
-                                      content: DropdownButtonFormField<String>(
-                                        value: _modePaiement,
-                                        items: ['CASH', 'TRANSFERT', 'CRÉDIT']
-                                            .map((label) => DropdownMenuItem(value: label, child: Text(label, style: const TextStyle(fontSize: 16))))
-                                            .toList(),
-                                        onChanged: (value) {
-                                          if (value != null) setState(() => _modePaiement = value);
-                                        },
-                                        decoration: const InputDecoration(
-                                          border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                                          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 10.0),
-                                    child: _buildSectionCard(
-                                      title: '3. Sélectionner des produits',
-                                      content: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: TextField(
-                                                  controller: productSearchController,
-                                                  decoration: InputDecoration(
-                                                      prefixIcon: const Icon(Icons.search),
-                                                      hintText: 'Rechercher un produit',
-                                                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)))
-                                                  ),
-                                                  onChanged: filterProducts,
-                                                  onTap: () {
-                                                    if (productSearchController.text.isNotEmpty) setState(() => _showProductSuggestions = true);
-                                                  },
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                decoration: BoxDecoration(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  color: Colors.blueGrey.shade100,
-                                                ),
-                                                child: IconButton(
-                                                  icon: Icon(Icons.qr_code_scanner, color: Colors.blueGrey.shade700),
-                                                  onPressed: () {/* TODO: scanner */},
-                                                  tooltip: "Scanner le code-barres",
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          _buildProductSuggestions(suggestionMaxHeight),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            } else {
-                              // Affichage en Row (Ligne) pour les grands écrans
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 10.0),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // 2. SECTION PAIEMENT (Expanded pour prendre 50% de l'espace)
-                                    Expanded(
-                                      child: _buildSectionCard(
-                                        title: '2. Mode de Paiement',
-                                        content: DropdownButtonFormField<String>(
-                                          value: _modePaiement,
-                                          items: ['CASH', 'TRANSFERT', 'CRÉDIT']
-                                              .map((label) => DropdownMenuItem(value: label, child: Text(label, style: const TextStyle(fontSize: 16))))
-                                              .toList(),
-                                          onChanged: (value) {
-                                            if (value != null) setState(() => _modePaiement = value);
-                                          },
-                                          decoration: const InputDecoration(
-                                            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 15), // Espace entre les deux cartes
-
-                                    // 3. SECTION PRODUIT (Expanded pour prendre 50% de l'espace)
-                                    Expanded(
-                                      child: _buildSectionCard(
-                                        title: '3. Sélectionner des produits',
-                                        content: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                Expanded(
-                                                  child: TextField(
-                                                    controller: productSearchController,
-                                                    decoration: InputDecoration(
-                                                        prefixIcon: const Icon(Icons.search),
-                                                        hintText: 'Rechercher un produit',
-                                                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8)))
-                                                    ),
-                                                    onChanged: filterProducts,
-                                                    onTap: () {
-                                                      if (productSearchController.text.isNotEmpty) setState(() => _showProductSuggestions = true);
-                                                    },
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Container(
-                                                  decoration: BoxDecoration(
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    color: Colors.blueGrey.shade100,
-                                                  ),
-                                                  child: IconButton(
-                                                    icon: Icon(Icons.qr_code_scanner, color: Colors.blueGrey.shade700),
-                                                    onPressed: () {/* TODO: scanner */},
-                                                    tooltip: "Scanner le code-barres",
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                            // La suggestion doit rester visible même si elle est dans une carte
-                                            _buildProductSuggestions(suggestionMaxHeight),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }
-                          },
-                        ),
-
-                        // 4. SECTION PANIER et TOTAUX (CORRIGÉ)
-                        _buildSectionCard(
-                          title: '4. Panier et Totaux',
-                          content: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // PANIER TABLEAU
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: DataTable(
-                                  columnSpacing: 18,
-                                  headingRowColor: MaterialStateProperty.all(Colors.blueGrey.shade50),
-                                  columns: const [
-                                    DataColumn(label: Text("Produit", style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text("Prix (FC)", style: TextStyle(fontWeight: FontWeight.bold))), // 💡 EN-TÊTE CORRIGÉ
-                                    DataColumn(label: Text("Stock", style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text("Qté", style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text("S.total (FC)", style: TextStyle(fontWeight: FontWeight.bold))), // 💡 EN-TÊTE CORRIGÉ
-                                    DataColumn(label: Text("Actions", style: TextStyle(fontWeight: FontWeight.bold))),
-                                  ],
-                                  rows: cart.map((item) {
-                                    final stockDispo = item.produit.quantiteActuelle ?? 0;
-                                    final stockColor = stockDispo <= 0 ? Colors.red : (stockDispo < 5 ? Colors.orange : Colors.green);
-
-                                    // 💡 NOUVEAU : Calculs basés sur la conversion
-                                    final priceVenteFC = getPriceVenteFC(item.produit);
-                                    final sousTotalFC = priceVenteFC * item.quantity;
-
-                                    return DataRow(cells: [
-                                      DataCell(Text(item.produit.nom ?? '', style: const TextStyle(fontWeight: FontWeight.w500))),
-
-                                      // 💡 CORRIGÉ : Utilise le prix converti en FC
-                                      DataCell(Text("${priceVenteFC.toStringAsFixed(0)} F")),
-
-                                      DataCell(Text(stockDispo.toString(), style: TextStyle(color: stockColor, fontWeight: FontWeight.bold))),
-                                      DataCell(Text("${item.quantity}")),
-
-                                      // 💡 CORRIGÉ : Utilise le sous-total converti en FC
-                                      DataCell(Text("${sousTotalFC.toStringAsFixed(0)} F", style: const TextStyle(fontWeight: FontWeight.bold))),
-
-                                      DataCell(Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          // Boutons d'ajustement de quantité
-                                          SizedBox(
-                                            width: 32, height: 32,
-                                            child: IconButton(
-                                              icon: const Icon(Icons.remove, size: 18),
-                                              onPressed: () => updateQuantity(item, -1),
-                                            ),
-                                          ),
-                                          // Bouton d'ajout
-                                          SizedBox(
-                                            width: 32, height: 32,
-                                            child: IconButton(
-                                              icon: const Icon(Icons.add, size: 18),
-                                              onPressed: item.quantity < stockDispo ? () => updateQuantity(item, 1) : null,
-                                              color: item.quantity < stockDispo ? Colors.green : Colors.grey,
-                                            ),
-                                          ),
-                                          // Bouton Supprimer Ligne
-                                          SizedBox(
-                                            width: 32, height: 32,
-                                            child: IconButton(
-                                              icon: const Icon(Icons.delete, size: 18, color: Colors.red),
-                                              onPressed: () => updateQuantity(item, -item.quantity),
-                                            ),
-                                          ),
-                                        ],
-                                      )),
-                                    ]);
-                                  }).toList(),
-                                ),
-                              ),
-                              // --- FIN PANIER TABLEAU ---
-                              const SizedBox(height: 15),
-                              // RAPPEL TOTAUX
-                              _buildTotalsDisplay(tempVente),
-                            ],
-                          ),
-                        ),
-
-                        // Espaceur final
-                        const SizedBox(height: 10),
-
-                      ],
-                    ),
-                  ),
+            // 1. BOUTON APERÇU (Version Compacte)
+            SizedBox(
+              height: 45,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.remove_red_eye, size: 18),
+                label: const Text("Aperçu", style: TextStyle(fontSize: 12)),
+                onPressed: canValidate ? () => _previewPdf(vente!, lignes!, client!) : null,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.indigo,
+                  side: const BorderSide(color: Colors.indigo),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ),
+            const SizedBox(width: 8),
 
-            // 2. Barre d'actions fixe (Inchangée)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _buildValidationButtons(canValidate, tempVente, tempLignes, client),
+            // 2. BOUTON VALIDER (Prend toute la place restante)
+            Expanded(
+              child: SizedBox(
+                height: 45,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.check_circle),
+                  label: const Text("VALIDER ET IMPRIMER", style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: canValidate ? validateSale : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    // Largeur maîtrisée pour éviter l'éparpillement visuel sur PC
+    final double contentWidth = screenWidth > 1000 ? 900 : screenWidth * 0.96;
+
+    final canValidate = selectedClient != null && cart.isNotEmpty;
+    final tempVente = canValidate ? createVente(isDraft: true) : null;
+    final tempLignes = canValidate ? createLignes(tempVente!) : null;
+
+    return Scaffold(
+      backgroundColor: Colors.grey.shade100,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        toolbarHeight: 70,
+        // 1. GAUCHE : TAUX + HISTORIQUE
+        leadingWidth: 280,
+        leading: Row(
+          children: [
+            const SizedBox(width: 15),
+            _buildExchangeRateDisplay(), // Votre widget Taux
+            const SizedBox(width: 12),
+            // BOUTON HISTORIQUE (Style discret mais accessible)
+            Container(
+              height: 40,
+              width: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.history, color: Colors.orangeAccent, size: 20),
+                tooltip: "Historique des ventes",
+                onPressed: () => widget.onNavigate(6), // Vers l'index 6 ajouté au Dashboard
+              ),
+            ),
+          ],
+        ),
+
+        // 2. CENTRE : TITRE
+        title: const Text("ENREGISTRER UNE VENTE",
+            style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.5, color: Colors.white)),
+        centerTitle: true,
+
+        // 3. DROITE : TOTAL COMPACT
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 15),
+            child: Center(child: _buildCompactHeaderTotal()),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: SizedBox(
+                  width: contentWidth,
+                  child: Column(
+                    children: [
+                      // --- BLOC 1 : CLIENT & PAIEMENT ---
+                      _buildFormCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildSectionTitle("INFOS CLIENT & PAIEMENT"),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: TextField(
+                                    controller: clientSearchController,
+                                    style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+                                    onChanged: filterClients,
+                                    decoration: _proInput("Sélectionner un client...", Icons.person_add_alt_1).copyWith(
+                                      suffixIcon: IconButton(
+                                        icon: Icon(
+                                          showNewClientForm ? Icons.cancel : Icons.add_circle,
+                                          color: showNewClientForm ? Colors.red : Colors.blue.shade700,
+                                        ),
+                                        onPressed: () {
+                                          setState(() {
+                                            showNewClientForm = !showNewClientForm;
+                                            if (showNewClientForm) selectedClient = null;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 15),
+                                Expanded(
+                                  flex: 2,
+                                  child: Wrap(
+                                    spacing: 8,
+                                    children: ['CASH', 'TRANSFERT', 'CRÉDIT'].map((m) => _buildPaymentOption(m)).toList(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            _buildClientSuggestions(200),
+                            if (showNewClientForm && selectedClient == null)
+                              _buildCompactNewClientForm(),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      // --- BLOC 2 : RECHERCHE ARTICLES + RÉDUCTION ---
+                      _buildFormCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildSectionTitle("AJOUTER DES PRODUITS"),
+                            Row(
+                              children: [
+                                // 1. RECHERCHE PRODUIT (Prend le plus d'espace)
+                                Expanded(
+                                  flex: 5,
+                                  child: TextField(
+                                    controller: productSearchController,
+                                    decoration: _proInput("Rechercher un article...", Icons.search),
+                                    onChanged: filterProducts,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+
+                                // 2. CHAMP RÉDUCTION (Nouveau : entre recherche et scan)
+                                // 2. CHAMP RÉDUCTION (La version qui fonctionne)
+                                SizedBox(
+                                  width: 100,
+                                  child: TextField(
+                                    controller: _remiseController, // 🎯 INDISPENSABLE : On lie le champ au contrôleur global
+                                    keyboardType: TextInputType.number,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                                    decoration: _proInput("Remise", Icons.percent).copyWith(
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                                    ),
+                                    onChanged: (val) {
+                                      // 🎯 On appelle setState vide.
+                                      // Comme _remiseController contient déjà le texte tapé,
+                                      // setState force l'AppBar à se redessiner en appelant getNetAPayer().
+                                      setState(() {});
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+
+                                // 3. BOUTON SCANNER
+                                _buildScannerButton(),
+                              ],
+                            ),
+                            _buildProductSuggestions(250),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      // --- BLOC 3 : LE PANIER ---
+                      _buildFormCard(
+                        padding: EdgeInsets.zero,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: _buildSectionTitle("CONTENU DU PANIER"),
+                            ),
+                            _buildProCartTable(),
+                          ],
+                        ),
+                      ),
+
+                      // Note: Le Bloc 4 (Résumé noir) a été supprimé car il est maintenant en haut à droite (AppBar)
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // --- BARRE DE VALIDATION FIXE ---
+          _buildFixedBottomBar(canValidate, tempVente, tempLignes),
+        ],
+      ),
+    );
+  }
+
+// --- COMPOSANTS DE STYLE ---
+
+  Widget _buildFormCard({required Widget child, EdgeInsets? padding}) {
+    return Container(
+      padding: padding ?? const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.blueGrey, letterSpacing: 1.1)),
+    );
+  }
+
+  InputDecoration _proInput(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: Icon(icon, color: Colors.black87, size: 20),
+      filled: true,
+      fillColor: Colors.grey.shade50,
+      isDense: true, // 👈 Réduit la hauteur interne
+      contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12), // 👈 Ajustement fin
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.black12)
+      ),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: Colors.black, width: 1.5)
+      ),
+    );
+  }
+
+  Widget _buildProCartTable() {
+    if (cart.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(30.0),
+        // À la ligne 892 environ :
+        child: Text("Panier vide", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
+      );
+    }
+    return Container(
+      width: double.infinity,
+      child: DataTable(
+        headingRowColor: MaterialStateProperty.all(Colors.grey.shade50),
+        dataRowHeight: 60,
+        columns: const [
+          DataColumn(label: Text("ARTICLE", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+          DataColumn(label: Text("PRIX UNIT.", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+          DataColumn(label: Text("QTÉ", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+          DataColumn(label: Text("TOTAL", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+          DataColumn(label: Text("", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+        ],
+        rows: cart.map((item) {
+          final price = getPriceVenteFC(item.produit);
+          return DataRow(cells: [
+            DataCell(Text(item.produit.nom ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black))),
+            DataCell(Text("${price.toStringAsFixed(0)} FC")),
+            DataCell(_buildQtySelector(item)),
+            DataCell(Text("${(price * item.quantity).toStringAsFixed(0)} FC", style: const TextStyle(fontWeight: FontWeight.bold))),
+            DataCell(IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => updateQuantity(item, -item.quantity))),
+          ]);
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildQtySelector(CartItem item) {
+    return Container(
+      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(20)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(icon: const Icon(Icons.remove, size: 18), onPressed: () => updateQuantity(item, -1)),
+          Text("${item.quantity}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          IconButton(icon: const Icon(Icons.add, size: 18), onPressed: () => updateQuantity(item, 1)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFixedBottomBar(bool can, Vente? v, List<LigneVente>? l) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      child: Center(
+        child: SizedBox(
+          width: 600,
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: can ? () => _previewPdf(v!, l!, selectedClient!) : null,
+                  icon: const Icon(Icons.visibility),
+                  label: const Text("APERÇU PDF"),
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 20), side: const BorderSide(color: Colors.black)),
+                ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: can ? validateSale : null,
+                  icon: const Icon(Icons.print),
+                  label: const Text("VALIDER ET IMPRIMER"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  // --- FORMULAIRE NOUVEAU CLIENT (Optimisé) ---
+  Widget _buildCompactNewClientForm() {
+    // 💡 PRÉCISION : Cache le formulaire si un client est déjà choisi ou si le bouton n'est pas activé
+    if (!showNewClientForm || selectedClient != null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 15),
+      child: Row(
+        children: [
+          Expanded(flex: 2, child: TextField(controller: nameController, decoration: _proInput("Nom", Icons.badge))),
+          const SizedBox(width: 8),
+          Expanded(flex: 2, child: TextField(controller: phoneController, decoration: _proInput("Tél", Icons.phone))),
+          const SizedBox(width: 8),
+          Expanded(flex: 3, child: TextField(controller: addressController, decoration: _proInput("Adresse", Icons.location_on))),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: addClient,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.black,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)) // Design plus "Windows"
+            ),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }// --- FORMULAIRE NOUVEAU CLIENT (3 champs sur une ligne) ---
+
+// 2. Bouton Scanner manquant
+  Widget _buildScannerButton() {
+    return Container(
+      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
+      child: IconButton(
+        icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+        onPressed: () {
+          // Logique de scan ici
+        },
+      ),
+    );
+  }
+  // À ajouter dans la classe _EnregistrementVenteState
+  Widget _buildPaymentOption(String mode) {
+    final isSelected = _modePaiement == mode;
+    return ChoiceChip(
+      label: Text(mode),
+      selected: isSelected,
+      selectedColor: Colors.blue.shade100,
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            _modePaiement = mode; // 🎯 Met à jour la variable d'état
+          });
+        }
+      },
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.blue.shade900 : Colors.black,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      ),
+    );
+  }
+  Widget _buildCompactHeaderTotal() {
+    // 🎯 On appelle la fonction unique, plus de calcul manuel ici !
+    double netAPayer = getNetAPayer();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE3F2FD),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: const Color(0xFF2196F3), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text("N. PAYER : ",
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+          Text("${netAPayer.toStringAsFixed(0)} FC",
+              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900, color: Color(0xFF02192C))),
+        ],
+      ),
+    );
+  }
+  double getNetAPayer() {
+    // 1. Somme du panier
+    double totalBrut = cart.fold(0, (sum, item) => sum + (getPriceVenteFC(item.produit) * item.quantity));
+    // 2. Récupération de la remise
+    double remisePourcent = double.tryParse(_remiseController.text) ?? 0.0;
+    // 3. Calcul du net
+    return totalBrut - (totalBrut * (remisePourcent / 100));
   }
 }

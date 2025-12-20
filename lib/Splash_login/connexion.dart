@@ -1,4 +1,5 @@
 import 'package:factura/DashboardVendor/vendeurs_dashboard.dart';
+import 'package:factura/Splash_login/dialogues_infos.dart';
 import 'package:factura/Superadmin/SuperAdminDashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
@@ -151,19 +152,39 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
     required String tooltip,
     required VoidCallback onPressed,
   }) {
-    // Utilisation de MouseRegion pour détecter le survol et d'un StatefulWidget
-    // pour que l'état de survol puisse être mis à jour.
     return Tooltip(
-      message: tooltip, // Le texte qui apparaît au survol
-      textStyle: const TextStyle(color: Colors.white, fontSize: 14),
+      message: tooltip,
+      textStyle: const TextStyle(color: Colors.white, fontSize: 12),
       decoration: BoxDecoration(
-        color: Colors.grey.shade800.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.black.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(4),
       ),
       child: TextButton.icon(
         onPressed: onPressed,
-        icon: Icon(icon, color: Colors.white30),
-        label: Text(label, style: const TextStyle(color: Colors.white30)),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white, // ⭐️ Couleur au clic
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ).copyWith(
+          // ⭐️ EFFET DE SURVOL : Change la couleur quand la souris passe dessus
+          foregroundColor: WidgetStateProperty.resolveWith<Color>((states) {
+            if (states.contains(WidgetState.hovered)) {
+              return Colors.yellowAccent; // Devient jaune au survol (ou blanc pur)
+            }
+            return Colors.white.withOpacity(0.7); // Blanc doux par défaut
+          }),
+        ),
+        icon: Icon(
+          icon,
+          size: 20,
+          // La couleur est gérée par le foregroundColor au-dessus
+        ),
+        label: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }
@@ -177,21 +198,51 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
           icon: Icons.help_outline,
           label: 'Aides',
           tooltip: 'Recevoir de l\'aide sur l\'utilisation de l\'application',
-          onPressed: () {},
+            onPressed: () {
+              DialoguesInfo.afficher(
+                context,
+                titre: "Aides",
+                message: "Voici comment utiliser l'application...",
+                icone: Icons.help_outline, // L'icône s'affichera
+                couleur: Colors.blue,
+              );
+            }
         ),
         const SizedBox(width: 30), // Espace accru entre les boutons
         _UtilityButton(
           icon: Icons.info_outline,
           label: 'À propos',
-          tooltip: 'À propose de l\'application Factura Vision',
-          onPressed: () {},
+          tooltip: 'À propos de l\'application Factura Vision',
+          onPressed: () {
+            DialoguesInfo.afficher(
+              context,
+              titre: "Factura Vision",
+              message: "Version 1.0.0\n\n"
+                  "Solution de gestion commerciale intelligente.\n"
+                  "Développée pour optimiser votre facturation et le suivi de vos stocks.\n\n"
+                  "© 2025 Factura Vision Team",
+              icone: Icons.info_outline,
+              couleur: Colors.orange,
+              // imagePath: 'assets/images/logo_app.png', // Tu pourras décommenter ça quand tu auras un logo
+            );
+          },
         ),
         const SizedBox(width: 30),
         _UtilityButton(
           icon: Icons.contact_mail_outlined,
           label: 'Nous contacter',
           tooltip: 'Contacter l\'équipe de développement',
-          onPressed: () {},
+            onPressed: () {
+              DialoguesInfo.afficher(
+                context,
+                titre: "Support Technique",
+                message: "Pour vous assister, répondre à votre question ou besoin des nos services, contactez-nous à travers les canaux ci-dessous  :",
+                imagePath: 'assets/images/familia.png', // La photo remplacera l'icône
+                whatsappNumber: "243821672206",
+                emailAddress: "support@facturavision.com",
+                couleur: Colors.green,
+              );
+            }
         ),
       ],
     );
@@ -318,14 +369,15 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
               ],
             ),
           ),
-
           // --- CÔTÉ DROIT : Formulaire de Connexion (Largeur réduite) ---
-          SizedBox(
-            width: loginPanelWidth, // ⭐️ Nouvelle largeur
-            child: Padding(
-              padding: const EdgeInsets.all(40.0),
-              child: _buildLoginForm(primaryColor, accentColor, isWideScreen: true),
-            ),
+          //SizedBox(
+            //width: loginPanelWidth, // On garde la largeur de 400
+            // SUPPRIME LE PADDING ICI
+           // child: _buildLoginForm(primaryColor, accentColor, isWideScreen: true),
+          //),
+          // --- CÔTÉ DROIT : Formulaire de Connexion (Windows) ---
+          Expanded(
+            child: _buildLoginForm(primaryColor, accentColor, isWideScreen: true),
           ),
         ],
       ),
@@ -333,119 +385,126 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
   }
 
   // ⭐️ Layout pour les petits écrans (INCHANGÉ)
-  Widget _buildMobileLayout(Color primaryColor, Color accentColor) {
-    return Padding(
-      padding: const EdgeInsets.all(32.0),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: _buildLoginForm(primaryColor, accentColor, isWideScreen: false),
-      ),
-    );
-  }
-
-  // ⭐️ Fonction pour construire le formulaire de connexion (INCHANGÉE)
   Widget _buildLoginForm(Color primaryColor, Color accentColor, {required bool isWideScreen}) {
-    // ... (Code de construction du formulaire inchangé, utilise les TextControllers et la logique de connexion)
     return Card(
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(isWideScreen ? 0 : 16.0),
+      clipBehavior: Clip.antiAlias, // Obligatoire pour couper l'image sur les bords arrondis
+      elevation: 0,
+      margin: EdgeInsets.zero, // Supprime les marges de la carte pour coller aux bords
+      shape: const RoundedRectangleBorder(
+        // Arrondis seulement sur les coins extérieurs droits pour Windows
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
       ),
-      elevation: isWideScreen ? 0 : 12,
-      child: Padding(
-        padding: isWideScreen ? EdgeInsets.zero : const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // --- ICÔNE & TEXTE ---
-            Image.asset(_appIconPath, height: 60),
-            const SizedBox(height: 10),
-            Text(
-              'Bienvenue chez Jeadot',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: primaryColor,
-              ),
+      child: Container(
+        width: double.infinity,
+        height: double.infinity, // ⭐️ REMPLIT TOUTE LA HAUTEUR
+        padding: const EdgeInsets.symmetric(horizontal: 40.0),
+        decoration: BoxDecoration(
+          image: DecorationImage(
+            image: const AssetImage('assets/images/shopjeadot.png'),
+            fit: BoxFit.cover, // L'image s'étire pour tout couvrir
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.55),
+              BlendMode.darken,
             ),
-            const SizedBox(height: 24),
-
-            // --- FORMULAIRE ---
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                labelText: 'Adresse e-mail',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                prefixIcon: const Icon(Icons.email),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _motDePasseController,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: 'Mot de passe',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                prefixIcon: const Icon(Icons.lock),
-              ),
-              onSubmitted: (_) => _login(),
-            ),
-            const SizedBox(height: 24),
-
-            // --- Message d'erreur ---
-            if (_errorMessage != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 16.0),
-                child: Text(
-                  _errorMessage!,
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+          ),
+        ),
+        child: Center( // Centre le formulaire au milieu de l'image
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Bienvenue chez nous",
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    shadows: [Shadow(blurRadius: 10, color: Colors.black)],
+                  ),
                   textAlign: TextAlign.center,
                 ),
-              ),
+                const SizedBox(height: 35),
 
-            // --- BOUTON DE CONNEXION ---
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _login,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                // --- EMAIL ---
+                TextField(
+                  controller: _emailController,
+                  style: const TextStyle(color: Colors.black),
+                  decoration: InputDecoration(
+                    labelText: 'Adresse e-mail',
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.9),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: const Icon(Icons.email),
+                  ),
                 ),
-                child: const Text('Se connecter', style: TextStyle(fontSize: 18)),
-              ),
-            ),
-            const SizedBox(height: 15),
+                const SizedBox(height: 16),
 
-            // --- MOT DE PASSE OUBLIÉ ---
-            TextButton(
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Fonctionnalité 'Mot de passe oublié' en cours de développement.")),
-                );
-              },
-              child: Text('Mot de passe oublié ?', style: TextStyle(color: accentColor)),
-            ),
-            const SizedBox(height: 20),
+                // --- MOT DE PASSE ---
+                TextField(
+                  controller: _motDePasseController,
+                  obscureText: true,
+                  style: const TextStyle(color: Colors.black),
+                  decoration: InputDecoration(
+                    labelText: 'Mot de passe',
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.9),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    prefixIcon: const Icon(Icons.lock),
+                  ),
+                  onSubmitted: (_) => _login(),
+                ),
 
-            // --- BOUTONS DE TEST RAPIDE ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildTestButton(context, 'SA', primaryColor),
-                _buildTestButton(context, 'ADM', Colors.green[700]!),
-                _buildTestButton(context, 'VEN', Colors.blue[700]!),
+                const SizedBox(height: 24),
+
+                // --- BOUTON CONNEXION ---
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Se connecter', style: TextStyle(fontSize: 18)),
+                  ),
+                ),
+
+                // --- LIEN MOT DE PASSE OUBLIÉ ---
+                TextButton(
+                  onPressed: () {},
+                  child: const Text(
+                    'Mot de passe oublié ?',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 15),
+
+                // --- BOUTONS DE TEST ---
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildTestButton(context, 'SA', primaryColor),
+                    _buildTestButton(context, 'ADM', Colors.green[700]!),
+                    _buildTestButton(context, 'VEN', Colors.blue[700]!),
+                  ],
+                ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
-
   // ⭐️ Fonction pour construire les boutons de test (INCHANGÉE)
   Widget _buildTestButton(BuildContext context, String role, Color color) {
     Utilisateur tempUser;
@@ -456,7 +515,6 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
     } else {
       tempUser = Utilisateur(nom: 'Vendeur', prenom: 'Jean', email: 'vendeur@factura.com', motDePasse: '', role: 'vendeur', postnom: '', telephone: '');
     }
-
     return ElevatedButton(
       onPressed: () {
         if (role == 'SA') {
@@ -473,6 +531,18 @@ class _ConnexionPageState extends State<ConnexionPage> with TickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       ),
       child: Text(role, style: const TextStyle(fontSize: 12)),
+    );
+  }
+
+  Widget _buildMobileLayout(Color primaryColor, Color accentColor) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500), // Largeur max pour rester joli
+          child: _buildLoginForm(primaryColor, accentColor, isWideScreen: false),
+        ),
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:factura/DashboardAdmin/ajout_produits.dart';
+import 'package:factura/Splash_login/dialogues_infos.dart';
 import 'package:factura/service_pdf.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/DashboardVendor/edite_produits_page.dart';
@@ -88,38 +89,48 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
     });
   }
 
-  // --- LOGIQUE DE CALCUL DES TOTAUX ---
+  // --- ⭐️ CORRIGÉ ⭐️ : LOGIQUE DE CALCUL DES TOTAUX MIS À JOUR ---
   Map<String, double> _calculateTotals() {
-    double totalValeurAchatFC = 0;
-    double totalValeurVenteFC = 0;
+    double totalValeurAchatInvestieFC = 0; // ⭐️ Renommé
+    double totalVentePotentielleFC = 0; // ⭐️ Renommé
     double totalStockReceptionne = 0;
     double totalStockDisponible = 0;
+
+    // Nous devons calculer le coût du stock disponible séparément pour la marge
+    double coutStockDisponibleFC = 0;
 
     for (var produit in _filteredProduits) {
       final prixAchatUSD = produit.prixAchatUSD ?? 0.0;
       final prixVenteUSD = produit.prix ?? 0.0;
 
-      final stockReceptionne = (produit.quantiteInitiale ?? 0).toDouble();
-      final stockDisponible = (produit.quantiteActuelle ?? 0).toDouble();
+      final stockReceptionne = (produit.quantiteInitiale ?? 0).toDouble(); // Qté Reçue
+      final stockDisponible = (produit.quantiteActuelle ?? 0).toDouble(); // Qté Dispo
 
       // Conversion en FC
       final prixAchatFC = prixAchatUSD * _tauxUSD;
       final prixVenteFC = prixVenteUSD * _tauxUSD;
 
-      // Valeur totale du stock actuel (multiplié par stockDisponible car c'est la valeur du stock restant)
-      totalValeurAchatFC += prixAchatFC * stockDisponible;
-      totalValeurVenteFC += prixVenteFC * stockDisponible;
+      // 1. CALCUL DE L'INVESTISSEMENT (BASÉ SUR LA QUANTITÉ REÇUE) ⭐️ Corrigé ⭐️
+      totalValeurAchatInvestieFC += prixAchatFC * stockReceptionne;
 
+      // 2. CALCUL DU POTENTIEL DE VENTE (BASÉ SUR LA QUANTITÉ DISPONIBLE)
+      totalVentePotentielleFC += prixVenteFC * stockDisponible;
+
+      // 3. CALCUL DU COÛT du stock RESTANT pour la Marge
+      coutStockDisponibleFC += prixAchatFC * stockDisponible;
+
+      // Totaux de quantités
       totalStockReceptionne += stockReceptionne;
       totalStockDisponible += stockDisponible;
     }
 
-    // Calcul de la marge globale potentielle
-    final margeTotaleFC = totalValeurVenteFC - totalValeurAchatFC;
+    // Marge Potentielle = Valeur Vente Potentielle - Coût du Stock Disponible
+    final margeTotaleFC = totalVentePotentielleFC - coutStockDisponibleFC;
+
 
     return {
-      'totalValeurAchatFC': totalValeurAchatFC,
-      'totalValeurVenteFC': totalValeurVenteFC,
+      'totalValeurAchatInvestieFC': totalValeurAchatInvestieFC, // ⭐️ Nouvelle clé
+      'totalVentePotentielleFC': totalVentePotentielleFC, // ⭐️ Nouvelle clé
       'totalStockReceptionne': totalStockReceptionne,
       'totalStockDisponible': totalStockDisponible,
       'margeTotaleFC': margeTotaleFC,
@@ -129,6 +140,7 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
   // --- ACTIONS D'EXPORT (Inchangé) ---
 
   List<Map<String, dynamic>> _formatDataForReport() {
+    // ... (Logique d'export inchangée) ...
     return _filteredProduits.map((p) {
       final stockReceptionne = p.quantiteInitiale ?? 0;
       final stockDisponible = p.quantiteActuelle ?? 0;
@@ -177,11 +189,19 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
   }
 
   // --- CRUD (Inchangé) ---
-  void _navigateToAddProduit() async {
-    final result = await Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const AjoutProduits()),
+  void _navigateToAddProduit() {
+    // Option : Dialogue structuré
+    DialoguesInfo.afficher(
+      context,
+      titre: "Gestion Multi-Boutiques",
+      message: "Le module de transfert et mouvement de stocks est en cours de configuration.\n\n"
+          "Cette option vous permettra bientôt de :\n"
+          "• Déplacer des produits entre vos boutiques.\n"
+          "• Suivre l'historique des entrées/sorties.\n"
+          "• Centraliser votre inventaire global.",
+      icone: Icons.warehouse_outlined,
+      couleur: Colors.indigo,
     );
-    if (result == true) _loadProduits();
   }
 
   void _navigateToEditProduit(Produit produit) async {
@@ -220,13 +240,14 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
     ) ?? false;
   }
 
-  // --- ⭐️ MISE À JOUR : COULEURS NOIRES ET CLAIRES POUR LES AGRÉGATS ⭐️ ---
+  // --- ⭐️ CORRIGÉ ⭐️ : MISE À JOUR DE LA BARRE D'AGRÉGATS ---
   Widget _buildTotalsRow(Map<String, double> totals) {
     // Formatage pour lisibilité (ex: 1 000 000)
     final f = NumberFormat("#,###", "fr_FR");
 
-    final totalAchat = totals['totalValeurAchatFC'] ?? 0.0;
-    final totalVente = totals['totalValeurVenteFC'] ?? 0.0;
+    // ⭐️ Utilisation des nouvelles clés et noms ⭐️
+    final totalInvesti = totals['totalValeurAchatInvestieFC'] ?? 0.0;
+    final totalVentePotentielle = totals['totalVentePotentielleFC'] ?? 0.0;
     final totalMarge = totals['margeTotaleFC'] ?? 0.0;
 
     // Pour les quantités, on peut utiliser toStringAsFixed(0) car ce sont des entiers
@@ -239,9 +260,10 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
     // Liste des agrégats pour les 4 colonnes
     final totalStats = [
       _TotalStat(title: 'Qté Reçue', value: totalRecu, color: clearBlack, isQuantity: true),
-      _TotalStat(title: 'Qté Disponible', value: totalDispo, color: clearBlack, isQuantity: true), // Couleur uniforme
-      _TotalStat(title: 'Valeur Achat Totale', value: '${f.format(totalAchat)} FC', color: clearBlack), // Couleur uniforme
-      _TotalStat(title: 'Valeur Vente Totale', value: '${f.format(totalVente)} FC', color: clearBlack), // Couleur uniforme
+      _TotalStat(title: 'Qté Disponible', value: totalDispo, color: clearBlack, isQuantity: true),
+      // Nouveaux titres
+      _TotalStat(title: 'Valeur Achat Investie', value: '${f.format(totalInvesti)} FC', color: clearBlack),
+      _TotalStat(title: 'Vente Potentielle', value: '${f.format(totalVentePotentielle)} FC', color: clearBlack),
     ];
 
     return Container(
@@ -254,22 +276,8 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Colonne du Titre (COTÉ GAUCHE)
-          const Padding(
-            padding: EdgeInsets.only(right: 20.0),
-            child: Text(
-                'TOTAUX :',
-                style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF13132D), // Noir profond
-                    fontSize: 20
-                )
-            ),
-          ),
 
-          const VerticalDivider(thickness: 2, color: Colors.indigo),
-
-          // 2. Les 4 Agrégats en colonnes égales (Expanded pour prendre l'espace)
+          // 1. Les 4 Agrégats en colonnes égales (Expanded pour prendre l'espace)
           Expanded(
             flex: 8, // Donne plus d'espace pour les 4 colonnes
             child: Row(
@@ -283,11 +291,15 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
             ),
           ),
 
-          // 3. Colonne de la Marge (Reste en rouge pour le contraste)
+          // Séparateur entre les agrégats principaux et la marge
+          const VerticalDivider(thickness: 1, indent: 5, endIndent: 5, color: Colors.indigo),
+          const SizedBox(width: 10),
+
+          // 2. Colonne de la Marge (Reste en rouge pour le contraste)
           Expanded(
             flex: 3,
             child: Padding(
-              padding: const EdgeInsets.only(left: 20.0),
+              padding: const EdgeInsets.only(left: 10.0), // Ajustement du padding
               child: Card(
                 color: Colors.white,
                 elevation: 4,
@@ -310,7 +322,7 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
     );
   }
 
-  // --- WIDGET PRINCIPAL BUILD (Inchangé) ---
+  // --- WIDGET PRINCIPAL BUILD ---
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -329,7 +341,7 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
               ElevatedButton.icon(
                 onPressed: _navigateToAddProduit,
                 icon: const Icon(Icons.add_circle_outline, color: Colors.white),
-                label: const Text('Ajouter un produit',
+                label: const Text('Mouvement du stock',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.indigo,
@@ -441,7 +453,18 @@ class _GestionStockProduitsState extends State<GestionStockProduits> {
 
           const SizedBox(height: 20),
 
-          // BARRE DE TOTAUX MISE À JOUR
+          // ⭐️ CORRIGÉ ⭐️ : TITRE 'TOTAUX :' DÉPORTÉ EN DEHORS DU CONTENEUR
+          const Text(
+              'TOTAUX :',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF13132D), // Noir profond
+                  fontSize: 18
+              )
+          ),
+          const SizedBox(height: 5), // Un petit espace
+
+          // BARRE DE TOTAUX MISE À JOUR (sans le titre interne)
           _buildTotalsRow(_calculateTotals()),
         ],
       ),

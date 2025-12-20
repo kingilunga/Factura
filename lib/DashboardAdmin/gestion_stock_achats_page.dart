@@ -1,3 +1,4 @@
+import 'package:factura/DashboardAdmin/edit_achats_dialog.dart';
 import 'package:factura/Modeles/model_achat_produits.dart';
 import 'package:flutter/material.dart';
 // Correction des imports nécessaires pour les dépendances :
@@ -132,7 +133,6 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
         );
       },
     );
-
     if (confirmation == true) {
       try {
         // La méthode est définie dans database_service.dart
@@ -141,14 +141,6 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
           produitId: achat.produitLocalId,
           quantiteSupprimee: achat.quantiteAchetee,
         );
-
-        // Simuler la suppression pour l'exemple s'il n'y a pas de logique DB pour l'instant
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Logique de suppression non implémentée (simulée).')),
-          );
-        }
-
         // Recharger les données
         await _loadAchatsProduits();
         if (mounted) {
@@ -165,30 +157,21 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
       }
     }
   }
-
-  // --- LOGIQUE DE MODIFICATION (UPDATE) : SQUELETTE ---
-
+  // Dans votre fichier gestion_stock_achats_page.dart
   void _showEditAchatDialog(AchatsProduit achat) {
-    // TODO: Implémenter le formulaire de modification ici.
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text("Modification Achat : ${achat.nomProduit}"),
-          content: const Text("Formulaire de modification à implémenter.\n\nAssurez-vous d'avoir l'ancienne quantité avant de sauvegarder!"),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
-            // TODO: Bouton Enregistrer -> Appelle dbService.modifierAchatEtAjusterStock
-          ],
+        return AchatEditDialog(
+          achat: achat,
+          onAchatUpdated: () {
+            // Remplacer setState(() {}); par _loadAchats() si elle existe.
+            setState(() {});
+          },
         );
       },
     );
   }
-
-  // --- LOGIQUE PDF ---
 
 // Fonction qui crée la section de résumé des totaux pour le PDF
   pw.Widget _buildTotalSummaryPDF() {
@@ -228,22 +211,20 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
       ),
     );
   }
-
   // Fonction qui crée le tableau des achats pour le PDF (détaillé)
   pw.Widget _buildAchatTablePDF(pw.Context context) {
     const tableHeaders = [
       'Fournisseur',
       'Produit (Type)',
       'Qté',
-      'Prix A. U.',
+      'Prix U.',
       'Frais U.',
-      'COÛT TOTAL LOT', // COLONNE COÛT TOTAL
+      'Coût total', // COLONNE COÛT TOTAL
       'Marge (%)',
       'P. Vente U.',
       'Date',
       'Expir.',
     ];
-
     final data = filteredProduits.map((achat) {
       final dateAchatStr = _formatDate(achat.dateAchat);
       final datePeremptionStr = achat.datePeremption != null
@@ -294,7 +275,6 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
       border: pw.TableBorder.all(color: PdfColors.grey500, width: 0.5),
     );
   }
-
   // Méthode appelée par le bouton "Exporter PDF"
   Future<void> _exportPDF() async {
     if (filteredProduits.isEmpty) {
@@ -415,11 +395,9 @@ class _GestionStockAchatsPageState extends State<GestionStockAchatsPage> {
       'Frais ', 'Coût total', 'Marge', 'P.Vente', 'Date',
       'Expir.', 'Actions'
     ];
-
     final rows = achats.map((p) {
       // Correction: Utilisation du getter 'totalCoutLot'
       final coutTotalLot = _formatCurrency(p.totalCoutLot, p.devise);
-
       return DataRow(
         color: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           if (achats.indexOf(p).isEven) {

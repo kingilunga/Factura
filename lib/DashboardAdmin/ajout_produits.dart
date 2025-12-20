@@ -2,14 +2,14 @@ import 'package:factura/Modeles/model_produits.dart';
 import 'package:flutter/material.dart';
 import 'package:factura/database/database_service.dart';
 
-class AjoutProduits extends StatefulWidget {
-  const AjoutProduits({super.key});
+class MouvementStock extends StatefulWidget {
+  const MouvementStock({super.key});
 
   @override
-  State<AjoutProduits> createState() => _AjoutProduitsState();
+  State<MouvementStock> createState() => _MouvementStockState();
 }
 
-class _AjoutProduitsState extends State<AjoutProduits> {
+class _MouvementStockState extends State<MouvementStock> {
   final _formKey = GlobalKey<FormState>();
   final _nomController = TextEditingController();
   final _categorieController = TextEditingController();

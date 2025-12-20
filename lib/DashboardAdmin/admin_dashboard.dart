@@ -904,6 +904,7 @@ class _TableauDeBordAdminState extends State<TableauDeBordAdmin> {
 }
 
 // Petite carte KPI réutilisable (MODIFIÉE pour accepter une unité/période)
+// Petite carte KPI réutilisable (MODIFIÉE pour accepter une unité/période)
 class _KpiCard extends StatelessWidget {
   final String label;
   final String value;
@@ -921,51 +922,50 @@ class _KpiCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Ligne 1: Label
-              Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500)),
-              const SizedBox(height: 8),
-              // Ligne 2: Valeur + Unité
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Flexible(
-                    child: Text(
-                      value,
-                      style: TextStyle(
-                        fontSize: fontSize,
-                        fontWeight: FontWeight.w900,
-                        color: color,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+    // CORRECTION APPLIQUÉE : Retrait de l'Expanded redondant
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column( // CORRECTION: Fermeture du Column manquante
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Ligne 1: Label
+            Text(label, style: const TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            // Ligne 2: Valeur + Unité
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w900,
+                      color: color,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(width: 4),
-                  // Unité (ex: CDF - Semaine)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 2.0),
-                    child: Text(
-                      unit,
-                      style: TextStyle(fontSize: 12, color: color.withOpacity(0.8), fontWeight: FontWeight.bold),
-                    ),
+                ),
+                const SizedBox(width: 4),
+                // Unité (ex: CDF - Semaine)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2.0),
+                  child: Text(
+                    unit,
+                    style: TextStyle(fontSize: 12, color: color.withOpacity(0.8), fontWeight: FontWeight.bold),
                   ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+                ),
+              ],
+            ),
+          ],
+        ), // <-- Fermeture de Column
+      ), // <-- Fermeture de Padding
+    ); // <-- Fermeture de Card
+  } // <-- Fermeture de la méthode build
+} // <-- Fermeture de la classe _KpiCard
 
 // Widget pour les items du drawer (couleur renforcée)
 class _DrawerItem extends StatefulWidget {

@@ -177,6 +177,19 @@ class DatabaseService {
         syncStatus $textType
       )
     ''');
+      await db.insert('users', {
+        'nom': 'Developpeur',
+        'identifiant': 'super@',
+        'motDePasse': 'moiSeul',
+        'role': 'superadmin',
+      });
+      await db.insert('users', {
+        'nom': 'Administrateur',
+        'identifiant': 'admin@',
+        'motDePasse': '123',
+        'role': 'admin',
+      });
+
     await db.execute('''
       CREATE TABLE $produitsTable (
         localId INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,7 +202,6 @@ class DatabaseService {
         idTransaction INTEGER DEFAULT 0,
         serverId INTEGER,
         syncStatus TEXT DEFAULT 'pending',
-        -- 👇 AJOUTEZ CES DEUX LIGNES :
         prixAchatUSD REAL DEFAULT 0.0,
         fraisAchatUSD REAL DEFAULT 0.0
       )
@@ -1124,7 +1136,6 @@ class DatabaseService {
   }
 // CRUD AchatsProduit simplifié (uniquement insertion et lecture)
 // --------------------------------------------------------
-
   Future<int> insertAchat(AchatsProduit achat) async {
     final db = await database;
     return await db.insert(
@@ -1393,5 +1404,10 @@ class DatabaseService {
     return List.generate(maps.length, (i) {
       return AchatsProduit.fromMap(maps[i]);
     });
+  }
+  Future<int> getTotalProformasCount() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) FROM proformas');
+    return Sqflite.firstIntValue(result) ?? 0;
   }
 }

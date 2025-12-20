@@ -120,7 +120,7 @@ Future<pw.Document> generatePdfA4(
         pw.Container(
           alignment: pw.Alignment.center,
           margin: const pw.EdgeInsets.only(bottom: 20),
-          child: pw.Text('FACTURE',
+          child: pw.Text('FACTURE PROFORMA',
               style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.blue700)),
         ),
 
@@ -141,7 +141,7 @@ Future<pw.Document> generatePdfA4(
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text('Facture: ${vente.venteId}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text('N°: ${vente.venteId}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
                 pw.Text('Date: ${vente.dateVente.split(' ')[0]}'),
                 pw.Text('Vendeur: ${vente.vendeurNom}'),
                 pw.Text('Paiement: ${vente.modePaiement}'),

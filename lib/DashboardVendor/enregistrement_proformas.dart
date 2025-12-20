@@ -3,12 +3,10 @@ import 'package:factura/Modeles/model_clients.dart';
 import 'package:factura/Modeles/model_produits.dart';
 import 'package:factura/Modeles/model_proforma.dart';
 import 'package:factura/database/database_service.dart';
-import 'package:factura/service_pdf.dart' as pdf_service;
+import 'package:factura/service_profoma_pdf.dart' as pdf_service;
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'package:printing/printing.dart';
-
-// Classe CartItem locale si elle n'est pas importée depuis un fichier modèle commun
 
 class EnregistrementProForma extends StatefulWidget {
   const EnregistrementProForma({super.key});
@@ -20,550 +18,409 @@ class EnregistrementProForma extends StatefulWidget {
 class _EnregistrementProFormaState extends State<EnregistrementProForma> {
   final db = DatabaseService.instance;
 
-  // --- VARIABLES D'ÉTAT CLIENT ---
-  List<Client> clients = [];
-  Client? selectedClient;
+  // --- CONTROLLERS ---
   final TextEditingController clientSearchController = TextEditingController();
-  List<Client> filteredClients = [];
-  bool _showClientSuggestions = false;
+  final TextEditingController productSearchController = TextEditingController();
+  final TextEditingController _remiseController = TextEditingController(text: "0");
 
-  // [NOUVEAU] Variables pour le formulaire "Nouveau Client"
-  bool showNewClientForm = false;
   final TextEditingController nameController = TextEditingController();
   final TextEditingController phoneController = TextEditingController();
   final TextEditingController addressController = TextEditingController();
 
-  // --- VARIABLES D'ÉTAT PRODUITS & PANIER ---
+  // --- ÉTAT ---
+  List<Client> clients = [];
+  List<Client> filteredClients = [];
+  Client? selectedClient;
+  bool _showClientSuggestions = false;
+  bool showNewClientForm = false;
+
   List<Produit> produits = [];
   List<Produit> filteredProducts = [];
-  final TextEditingController productSearchController = TextEditingController();
   bool _showProductSuggestions = false;
   List<CartItem> cart = [];
 
-  // --- VARIABLES D'ÉTAT TRANSACTION ---
   double _currentExchangeRate = 0.0;
-  String _deviseSelected = 'CDF';
-  // ignore: unused_field
-  final List<String> _deviseOptions = ['CDF', 'USD'];
-  String _modePaiement = 'A CREDIT';
-
-  int _salesCounter = 0;
+  String _modePaiement = 'CASH';
 
   @override
   void initState() {
     super.initState();
     _loadData();
-
-    clientSearchController.addListener(() {
-      if (clientSearchController.text.isEmpty) {
-        setState(() => _showClientSuggestions = false);
-      }
-    });
-    productSearchController.addListener(() {
-      if (productSearchController.text.isEmpty) {
-        setState(() => _showProductSuggestions = false);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    // Nettoyage des contrôleurs
-    clientSearchController.dispose();
-    productSearchController.dispose();
-    nameController.dispose();
-    phoneController.dispose();
-    addressController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadData() async {
-    final totalSales = await db.getTotalVentesCount();
     final realRate = await db.getLatestExchangeRate();
-    await loadClients();
-    await loadProducts();
-
+    final allClients = await db.getAllClients();
+    final allProducts = await db.getAllProduits();
     if (mounted) {
       setState(() {
-        _salesCounter = totalSales;
+        clients = allClients;
+        produits = allProducts;
         _currentExchangeRate = realRate ?? 1.0;
       });
     }
   }
 
-  // --- LOGIQUE DE SÉLECTION ET AJOUT DE CLIENT ---
-
-  Future<void> loadClients() async {
-    final list = await db.getAllClients();
-    if (mounted) {
-      setState(() {
-        clients = list;
-        filteredClients = list;
-      });
-    }
-  }
-
-  void filterClients(String query) {
-    setState(() {
-      if (query.isEmpty) {
-        filteredClients = clients;
-        _showClientSuggestions = false;
-      } else {
-        filteredClients = clients.where((client) =>
-        (client.nomClient?.toLowerCase().contains(query.toLowerCase()) ?? false) ||
-            (client.telephone?.contains(query) ?? false)
-        ).toList();
-        _showClientSuggestions = filteredClients.isNotEmpty;
-      }
-    });
-  }
-
-  void selectClient(Client client) {
-    setState(() {
-      selectedClient = client;
-      clientSearchController.text = client.nomClient ?? '';
-      _showClientSuggestions = false;
-      showNewClientForm = false; // Fermer le formulaire si on sélectionne un existant
-    });
-  }
-
-  // [NOUVEAU] Fonction pour ajouter un client rapidement
   Future<void> addClient() async {
-    final name = nameController.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Le nom du client est obligatoire')));
-      return;
-    }
+    if (nameController.text.isEmpty) return;
 
-    final newClient = Client(
-      nomClient: name,
-      telephone: phoneController.text.trim().isEmpty ? null : phoneController.text.trim(),
-      adresse: addressController.text.trim().isEmpty ? null : addressController.text.trim(),
+    final nouveau = Client(
+      nomClient: nameController.text,
+      telephone: phoneController.text,
+      adresse: addressController.text,
     );
 
-    try {
-      // Insertion en BDD
-      final localId = await db.insertClient(newClient);
+    await db.insertClient(nouveau);
+    final allClients = await db.getAllClients();
 
-      // Rechargement de la liste
-      await loadClients();
-
-      // Sélection automatique du nouveau client
-      // On cherche le client qu'on vient d'ajouter (par ID ou par nom si ID pas retourné)
-      final justAdded = clients.firstWhere(
-              (c) => c.localId == localId,
-          orElse: () => clients.last // Fallback
-      );
-
-      if (!mounted) return;
-      setState(() {
-        showNewClientForm = false;
-        selectedClient = justAdded;
-        clientSearchController.text = selectedClient?.nomClient ?? '';
-        _showClientSuggestions = false;
-
-        // Vider les champs
-        nameController.clear();
-        phoneController.clear();
-        addressController.clear();
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Client ajouté avec succès !')));
-
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur ajout client: $e')));
-    }
-  }
-
-  // --- LOGIQUE DE PRODUITS ET PANIER ---
-
-  Future<void> loadProducts() async {
-    final list = await db.getAllProduits();
-    if (mounted) {
-      setState(() => produits = list);
-    }
-  }
-
-  void filterProducts(String query) {
     setState(() {
-      if (query.isEmpty) {
-        filteredProducts = [];
-        _showProductSuggestions = false;
-      } else {
-        filteredProducts = produits.where((p) =>
-            p.nom!.toLowerCase().contains(query.toLowerCase())
-        ).toList();
-        _showProductSuggestions = filteredProducts.isNotEmpty;
-      }
+      clients = allClients;
+      selectedClient = nouveau;
+      clientSearchController.text = nouveau.nomClient!;
+      showNewClientForm = false;
+      nameController.clear();
+      phoneController.clear();
+      addressController.clear();
     });
   }
 
-  void addProductToCart(Produit produit) {
-    int existingIndex = cart.indexWhere((item) => item.produit.localId == produit.localId);
-    final maxQuantity = produit.quantiteActuelle ?? 0;
-
-    if (existingIndex != -1) {
-      if (cart[existingIndex].quantity < maxQuantity) {
-        setState(() {
-          cart[existingIndex].quantity++;
-          productSearchController.clear();
-          _showProductSuggestions = false;
-        });
-      } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Stock maximum atteint.")));
-      }
-    } else {
-      if (maxQuantity > 0) {
-        setState(() {
-          cart.add(CartItem(produit: produit, quantity: 1));
-          productSearchController.clear();
-          _showProductSuggestions = false;
-        });
-      } else {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Produit en rupture de stock.")));
-      }
-    }
-  }
-
-  void updateQuantity(CartItem item, int delta) {
-    setState(() {
-      final newQuantity = item.quantity + delta;
-      if (newQuantity <= 0) {
-        cart.remove(item);
-      } else {
-        final maxQuantity = item.produit.quantiteActuelle ?? 0;
-        if (newQuantity <= maxQuantity) {
-          item.quantity = newQuantity;
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Stock maximum atteint pour ce produit.")),
-            );
-          }
-        }
-      }
-    });
-  }
-
-
-  // --- LOGIQUE DE PRO-FORMA ---
-
-  double get total => cart.fold(0, (sum, item) => sum + (item.produit.prix ?? 0.0) * (item.quantity));
-  double get discountAmount => total * 0.06;
+  double getPriceVenteFC(Produit p) => (p.prix ?? 0.0) * (_currentExchangeRate > 0 ? _currentExchangeRate : 1.0);
+  double get total => cart.fold(0, (sum, item) => sum + (getPriceVenteFC(item.produit) * item.quantity));
+  double get discountAmount => total * ((double.tryParse(_remiseController.text) ?? 0) / 100);
   double get netToPay => total - discountAmount;
 
-  ProForma createProFormaModel() {
-    final sequence = (_salesCounter + 1).toString().padLeft(3, '0');
-    final newProFormaId = 'PF-${DateTime.now().year}-$sequence';
-
-    return ProForma(
-      proFormaId: newProFormaId,
-      dateCreation: DateTime.now().toIso8601String(),
-      clientLocalId: selectedClient!.localId!,
-      vendeurNom: 'Vendeur',
-      modePaiement: _modePaiement,
-      deviseTransaction: _deviseSelected,
-      tauxDeChange: _currentExchangeRate,
-      totalBrut: total,
-      reductionPercent: discountAmount,
-      totalNet: netToPay,
-    );
-  }
-
-  List<LigneProForma> createLignesProForma(ProForma proForma) {
-    return cart.map((item) {
-      final prixUnitaireUSD = item.produit.prix ?? 0.0;
-      return LigneProForma(
-        ligneProFormaId: const Uuid().v4(),
-        proFormaLocalId: proForma.localId ?? 0,
-        produitLocalId: item.produit.localId!,
-        nomProduit: item.produit.nom!,
-        prixVenteUnitaire: prixUnitaireUSD,
-        quantite: item.quantity,
-        sousTotal: prixUnitaireUSD * item.quantity,
-      );
-    }).toList();
-  }
-
-
   Future<void> validateProForma() async {
-    if (selectedClient == null || cart.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Veuillez sélectionner un client et ajouter des produits au panier.")),
-        );
-      }
+    // 1. Vérification de sécurité avant de commencer
+    if (selectedClient == null) {
+      debugPrint("Erreur : Aucun client sélectionné");
+      return;
+    }
+    if (cart.isEmpty) {
+      debugPrint("Erreur : Le panier est vide");
       return;
     }
 
-    final client = selectedClient!;
-    final proForma = createProFormaModel();
-    final lignes = createLignesProForma(proForma);
+    try {
+      final now = DateTime.now();
+      final String genId = 'PF-${now.year}${now.month}${now.day}-${now.hour}${now.minute}${now.second}';
 
-    // Insertion en BDD (Assurez-vous que la méthode existe dans DatabaseService)
-    await db.insertProForma(proForma, lignes);
+      // 💡 On utilise 'selectedClient?.localId' avec une valeur par défaut (0) ou on gère l'absence
+      final int clientID = selectedClient?.localId ?? 0;
 
-    // Génération PDF
-    final pdfProFormaData = pdf_service.PdfVente(
-      venteId: proForma.proFormaId,
-      dateVente: proForma.dateCreation,
-      vendeurNom: proForma.vendeurNom ?? '---',
-      modePaiement: proForma.modePaiement ?? _modePaiement,
-      totalBrut: proForma.totalBrut,
-      montantReduction: proForma.reductionPercent,
-      totalNet: proForma.totalNet,
-    );
+      final proForma = ProForma(
+        proFormaId: genId,
+        dateCreation: now.toIso8601String(),
+        clientLocalId: clientID, // On utilise la variable sécurisée
+        vendeurNom: 'Vendeur',
+        modePaiement: _modePaiement,
+        deviseTransaction: 'FC',
+        tauxDeChange: _currentExchangeRate,
+        totalBrut: total,
+        reductionPercent: (double.tryParse(_remiseController.text) ?? 0),
+        totalNet: netToPay,
+      );
 
-    final pdfLignes = lignes.map((l) => pdf_service.PdfLigneVente(
-      nomProduit: l.nomProduit,
-      prixVenteUnitaire: l.prixVenteUnitaire,
-      quantite: l.quantite,
-      sousTotal: l.sousTotal,
-    )).toList();
+      final lignes = cart.map((item) {
+        // Sécurité sur l'ID du produit
+        final int produitID = item.produit.localId ?? 0;
 
-    final pdfClientData = pdf_service.PdfClient(
-      nomClient: client.nomClient ?? 'Client Inconnu',
-      telephone: client.telephone,
-      adresse: client.adresse,
-    );
+        return LigneProForma(
+          ligneProFormaId: const Uuid().v4(),
+          proFormaLocalId: 0,
+          produitLocalId: produitID,
+          nomProduit: item.produit.nom ?? "Produit sans nom",
+          prixVenteUnitaire: getPriceVenteFC(item.produit),
+          quantite: item.quantity,
+          sousTotal: getPriceVenteFC(item.produit) * item.quantity,
+        );
+      }).toList();
 
-    final doc = await pdf_service.generatePdfA4(pdfProFormaData, pdfLignes, pdfClientData);
+      await db.insertProForma(proForma, lignes);
 
-    await Printing.sharePdf(bytes: await doc.save(), filename: 'proforma_${proForma.proFormaId}.pdf');
+      final doc = await pdf_service.generatePdfA4(
+        pdf_service.PdfVente(
+            venteId: proForma.proFormaId,
+            dateVente: proForma.dateCreation,
+            vendeurNom: 'Vendeur',
+            modePaiement: 'PRO-FORMA',
+            totalBrut: total,
+            montantReduction: discountAmount,
+            totalNet: netToPay
+        ),
+        lignes.map((l) => pdf_service.PdfLigneVente(
+            nomProduit: l.nomProduit,
+            prixVenteUnitaire: l.prixVenteUnitaire,
+            quantite: l.quantite,
+            sousTotal: l.sousTotal
+        )).toList(),
+        pdf_service.PdfClient(
+            nomClient: selectedClient?.nomClient ?? "Client inconnu",
+            telephone: selectedClient?.telephone
+        ),
+      );
 
-    if (mounted) {
-      setState(() {
-        cart.clear();
-        selectedClient = null;
-        clientSearchController.clear();
-        _salesCounter++;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Pro-Forma créée et partagée (Stock inchangé).")));
+      await Printing.sharePdf(bytes: await doc.save(), filename: '${proForma.proFormaId}.pdf');
+
+      if (mounted) {
+        setState(() => cart.clear());
+        if (Navigator.canPop(context)) Navigator.pop(context);
+      }
+    } catch (e) {
+      debugPrint("Erreur validation réelle : $e");
     }
   }
 
-  // --- WIDGETS D'AIDE (MODIFIÉ AVEC AJOUT CLIENT) ---
+  InputDecoration _proInput(String hint, IconData? icon) {
+    return InputDecoration(
+      prefixIcon: icon != null ? Icon(icon, color: Colors.blueGrey, size: 18) : null,
+      hintText: hint,
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade200)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+    );
+  }
 
-  Widget _buildClientSelection() {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('1. Sélection du Client', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueGrey.shade700)),
-            const Divider(height: 20, color: Colors.blueGrey),
+  @override
+  Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    double contentWidth = screenWidth > 1000 ? screenWidth * 0.5 : screenWidth * 0.95;
 
-            // Zone de Recherche
-            TextField(
-              controller: clientSearchController,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.person_search),
-                hintText: selectedClient == null ? 'Rechercher un client par nom/téléphone' : selectedClient!.nomClient,
-                border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(8))),
-                suffixIcon: selectedClient != null ? IconButton(
-                  icon: const Icon(Icons.clear, color: Colors.red),
-                  onPressed: () {
-                    setState(() {
-                      selectedClient = null;
-                      clientSearchController.clear();
-                      _showClientSuggestions = false;
-                    });
-                  },
-                ) : null,
-              ),
-              onChanged: filterClients,
-              onTap: () {
-                if (clientSearchController.text.isNotEmpty) setState(() => _showClientSuggestions = true);
-              },
+    return Scaffold(
+      backgroundColor: const Color(0xFFF1F3F4),
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        title: const Text("NOUVELLE PRO-FORMA", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+        actions: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(right: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4)),
+              child: Text("${netToPay.toStringAsFixed(0)} FC", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
             ),
+          )
+        ],
+      ),
 
-            // Liste de suggestions
-            if (_showClientSuggestions)
-              Container(
-                constraints: const BoxConstraints(maxHeight: 200),
-                margin: const EdgeInsets.only(top: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
+      // 1. Le corps contient uniquement le formulaire défilant
+      body: Center(
+        child: SizedBox(
+          width: contentWidth,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // On laisse de la place en bas pour le bouton
+            child: Column(
+              children: [
+                _buildSectionCard(
+                  title: "INFOS CLIENT & PAIEMENT",
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: clientSearchController,
+                              decoration: _proInput("Sélectionner un client...", Icons.person_outline).copyWith(
+                                suffixIcon: IconButton(
+                                  icon: Icon(showNewClientForm ? Icons.remove_circle : Icons.add_circle, color: Colors.blue),
+                                  onPressed: () => setState(() => showNewClientForm = !showNewClientForm),
+                                ),
+                              ),
+                              onChanged: (v) => setState(() {
+                                filteredClients = clients.where((c) => c.nomClient!.toLowerCase().contains(v.toLowerCase())).toList();
+                                _showClientSuggestions = v.isNotEmpty;
+                              }),
+                            ),
+                          ),
+                          const SizedBox(width: 15),
+                          _buildPaymentToggle(),
+                        ],
+                      ),
+                      if (showNewClientForm) _buildCompactNewClientForm(),
+                      if (_showClientSuggestions && !showNewClientForm) _buildClientSuggestionsList(),
+                    ],
+                  ),
                 ),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: filteredClients.length,
-                  itemBuilder: (context, index) {
-                    final client = filteredClients[index];
-                    return ListTile(
-                      title: Text(client.nomClient ?? 'Client sans nom'),
-                      subtitle: Text(client.telephone ?? 'N/A'),
-                      onTap: () => selectClient(client),
+                const SizedBox(height: 15),
+                _buildSectionCard(
+                  title: "AJOUTER DES PRODUITS",
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: productSearchController,
+                          decoration: _proInput("Rechercher un article...", Icons.search),
+                          onChanged: (v) => setState(() {
+                            filteredProducts = produits.where((p) => p.nom!.toLowerCase().contains(v.toLowerCase())).toList();
+                            _showProductSuggestions = v.isNotEmpty;
+                          }),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: _remiseController,
+                          textAlign: TextAlign.center,
+                          decoration: _proInput("%", null),
+                          onChanged: (v) => setState(() {}),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const CircleAvatar(backgroundColor: Colors.black, radius: 25, child: Icon(Icons.qr_code_scanner, color: Colors.white)),
+                    ],
+                  ),
+                ),
+                if (_showProductSuggestions) _buildProductSuggestionsList(),
+                const SizedBox(height: 15),
+
+                // Ici on affiche le tableau du panier (il est dans la zone scrollable)
+                _buildSectionCard(
+                  title: "CONTENU DU PANIER",
+                  child: PanierFormulaire(
+                    selectedClient: selectedClient,
+                    cart: cart,
+                    currentExchangeRate: _currentExchangeRate,
+                    deviseSelected: 'FC',
+                    onUpdateQuantity: (item, delta) => setState(() { item.quantity += delta; if (item.quantity <= 0) cart.remove(item); }),
+                    modePaiement: _modePaiement,
+                    remiseSaisie: discountAmount,
+                    canValidate: (selectedClient != null && cart.isNotEmpty),
+                    onValidateVente: validateProForma,
+                    //isProformaView: true, // Optionnel selon ton composant
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+
+      // 2. LE BOUTON FIXÉ EN BAS (Modifié pour le changement de couleur)
+      bottomNavigationBar: Container(
+        color: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 15),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: contentWidth,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Builder(
+                  builder: (context) {
+                    // On définit la condition de validation
+                    final bool isReady = selectedClient != null && cart.isNotEmpty;
+
+                    return ElevatedButton.icon(
+                      onPressed: isReady ? validateProForma : null,
+                      icon: Icon(
+                        Icons.check_circle_outline,
+                        // L'icône devient blanche quand c'est prêt
+                        color: isReady ? Colors.white : Colors.black54,
+                      ),
+                      label: Text(
+                        "ENREGISTRER LA PRO-FORMA",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          // Le texte devient blanc quand c'est prêt
+                          color: isReady ? Colors.white : Colors.black54,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        // 🔥 ICI : Si isReady est vrai -> Vert, sinon -> Gris
+                        backgroundColor: isReady ? Colors.green : const Color(0xFFEEEEEE),
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: isReady ? 4 : 0, // Un peu d'ombre quand c'est actif
+                      ),
                     );
                   },
                 ),
               ),
-
-            const SizedBox(height: 10),
-
-            // [NOUVEAU] BOUTON POUR BASCULER LE FORMULAIRE NOUVEAU CLIENT
-            TextButton.icon(
-              icon: Icon(showNewClientForm ? Icons.close : Icons.person_add, color: Colors.blue),
-              label: Text(
-                  showNewClientForm ? "Annuler l'ajout" : "Ajouter un nouveau client",
-                  style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)
-              ),
-              onPressed: () => setState(() => showNewClientForm = !showNewClientForm),
             ),
-
-            // [NOUVEAU] FORMULAIRE D'AJOUT (VISIBLE SI showNewClientForm est TRUE)
-            if (showNewClientForm) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
-                ),
-                child: Column(
-                  children: [
-                    TextField(
-                        controller: nameController,
-                        decoration: const InputDecoration(labelText: "Nom du client *", filled: true, fillColor: Colors.white)
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                        controller: phoneController,
-                        decoration: const InputDecoration(labelText: "Téléphone", filled: true, fillColor: Colors.white),
-                        keyboardType: TextInputType.phone
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                        controller: addressController,
-                        decoration: const InputDecoration(labelText: "Adresse", filled: true, fillColor: Colors.white)
-                    ),
-                    const SizedBox(height: 12),
-                    Align(
-                        alignment: Alignment.centerRight,
-                        child: ElevatedButton.icon(
-                          icon: const Icon(Icons.save),
-                          label: const Text("Enregistrer et Sélectionner"),
-                          onPressed: addClient,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
-                        )
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    const suggestionMaxHeight = 350.0;
-    const fixedButtonHeight = 110.0;
-    final canValidate = selectedClient != null && cart.isNotEmpty;
+  Widget _buildSectionCard({required String title, required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10)]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+        const SizedBox(height: 12),
+        child,
+      ]),
+    );
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("Nouvelle Pro-Forma"),
-        centerTitle: true,
-        backgroundColor: Colors.orange.shade700,
-        foregroundColor: Colors.white,
-        elevation: 4,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: Center(
-              child: Text(
-                "Taux: ${_currentExchangeRate.toStringAsFixed(2)}",
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: Stack(
+  Widget _buildCompactNewClientForm() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 15),
+      child: Row(
         children: [
-          Positioned.fill(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, fixedButtonHeight),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 900),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 1. SECTION CLIENT (Avec formulaire embarqué)
-                      _buildClientSelection(),
-
-                      // 2. UTILISATION DU WIDGET RÉUTILISABLE
-                      PanierFormulaire(
-                        selectedClient: selectedClient,
-                        cart: cart,
-                        currentExchangeRate: _currentExchangeRate,
-                        deviseSelected: _deviseSelected,
-                        onAddProduct: addProductToCart,
-                        onUpdateQuantity: updateQuantity,
-                        onFilterProducts: filterProducts,
-                        filteredProducts: filteredProducts,
-                        showProductSuggestions: _showProductSuggestions,
-                        suggestionMaxHeight: suggestionMaxHeight,
-                        productSearchController: productSearchController,
-                        modePaiement: _modePaiement,
-                        canValidate: canValidate,
-                        onValidateVente: validateProForma,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // BARRE D'ACTION FIXE
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 15, offset: const Offset(0, -5))],
-              ),
-              padding: const EdgeInsets.only(top: 15, bottom: 25, left: 16, right: 16),
-              width: double.infinity,
-              child: SafeArea(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1000),
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.description, size: 24),
-                      label: const Text("ENREGISTRER ET PARTAGER LA PRO-FORMA", overflow: TextOverflow.ellipsis),
-                      onPressed: canValidate ? validateProForma : null,
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange.shade700,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-                          textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 6
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          Expanded(child: TextField(controller: nameController, decoration: _proInput("Nom", null))),
+          const SizedBox(width: 5),
+          Expanded(child: TextField(controller: phoneController, decoration: _proInput("Tél", null))),
+          const SizedBox(width: 5),
+          Expanded(child: TextField(controller: addressController, decoration: _proInput("Adresse", null))),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: addClient,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 20)),
+            child: const Text("OK"),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPaymentToggle() {
+    return Row(children: ["CASH", "CRÉDIT"].map((m) => GestureDetector(
+      onTap: () => setState(() => _modePaiement = m),
+      child: Container(
+        margin: const EdgeInsets.only(left: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+        decoration: BoxDecoration(
+          color: _modePaiement == m ? const Color(0xFFEDE7F6) : Colors.white,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: _modePaiement == m ? const Color(0xFF673AB7) : Colors.grey.shade300),
+        ),
+        child: Text(m, style: TextStyle(color: _modePaiement == m ? const Color(0xFF673AB7) : Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
+      ),
+    )).toList());
+  }
+
+  Widget _buildClientSuggestionsList() {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 150),
+      child: ListView(shrinkWrap: true, children: filteredClients.map((c) => ListTile(
+        title: Text(c.nomClient!, style: const TextStyle(fontSize: 13)),
+        onTap: () => setState(() { selectedClient = c; clientSearchController.text = c.nomClient!; _showClientSuggestions = false; }),
+      )).toList()),
+    );
+  }
+
+  Widget _buildProductSuggestionsList() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.grey.shade200)),
+      child: ListView.builder(shrinkWrap: true, itemCount: filteredProducts.length, itemBuilder: (context, index) {
+        final p = filteredProducts[index];
+        return ListTile(title: Text(p.nom!), subtitle: Text("${getPriceVenteFC(p)} FC"), onTap: () => setState(() {
+          int idx = cart.indexWhere((item) => item.produit.localId == p.localId);
+          if (idx != -1) { cart[idx].quantity++; } else { cart.add(CartItem(produit: p, quantity: 1)); }
+          productSearchController.clear(); _showProductSuggestions = false;
+        }));
+      }),
     );
   }
 }

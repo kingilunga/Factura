@@ -1,5 +1,5 @@
-// Fichier: lib/pages/admin/gestion_factures.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:factura/database/database_service.dart';
 import 'package:factura/Modeles/model_ventes.dart';
 import 'package:factura/Modeles/model_clients.dart';
@@ -19,16 +19,15 @@ class _GestionFacturesState extends State<GestionFactures> {
   final db = DatabaseService.instance;
 
   List<Vente> ventes = [];
-  Map<int, List<LigneVente>> lignesCache = {}; // cache pour détails
-  Map<int, Client?> clientsCache = {}; // cache pour clients
+  Map<int, List<LigneVente>> lignesCache = {};
+  Map<int, Client?> clientsCache = {};
   final TextEditingController searchController = TextEditingController();
   List<Vente> filteredVentes = [];
 
-  // Variables de gestion de période
   DateTime? startDate;
   DateTime? endDate;
 
-  // Données Statiques de l'Entreprise (Elles devraient idéalement être retirées si elles ne servent qu'à l'export, qui est dans service_pdf.dart)
+  // Données Statiques de l'Entreprise (à adapter si nécessaire)
   final String nomEntreprise = "Factura Vision S.A.R.L";
   final String adresseEntreprise = "123, Av. du Code, Kinshasa, RDC";
   final String telephoneEntreprise = "+243 81 000 0000";
@@ -49,7 +48,6 @@ class _GestionFacturesState extends State<GestionFactures> {
     super.dispose();
   }
 
-  // loadVentes utilise les dates pour filtrer
   Future<void> loadVentes() async {
     final loaded = await db.getAllVentes(
       startDate: startDate,
@@ -69,16 +67,15 @@ class _GestionFacturesState extends State<GestionFactures> {
       return;
     }
     setState(() {
-      _loadClientsForFiltering(); // S'assurer que les noms de clients sont là
+      _loadClientsForFiltering();
       filteredVentes = ventes.where((v) {
-        final clientName = clientsCache[v.localId]?.nomClient.toLowerCase() ?? '';
+        final clientName = clientsCache[v.localId]?.nomClient?.toLowerCase() ?? '';
         return clientName.contains(q) || v.venteId.toLowerCase().contains(q);
       }).toList();
     });
   }
 
   Future<void> _loadClientsForFiltering() async {
-    // Cette fonction est optimisée pour charger les clients qui manquent
     for (var vente in ventes) {
       if (vente.clientLocalId != null && !clientsCache.containsKey(vente.localId)) {
         final client = await db.getClientById(vente.clientLocalId!);
@@ -92,7 +89,7 @@ class _GestionFacturesState extends State<GestionFactures> {
   }
 
 
-  // --- LOGIQUE DE SUPPRESSION (inchangée) ---
+  // --- LOGIQUE DE SUPPRESSION ---
   Future<void> deleteVente(Vente vente) async {
     if (vente.localId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,9 +145,8 @@ class _GestionFacturesState extends State<GestionFactures> {
   }
   // --- FIN LOGIQUE DE SUPPRESSION ---
 
-  // showVenteDetails (inchangée)
+  // showVenteDetails (inchangée - seulement pour l'aperçu)
   Future<void> showVenteDetails(Vente vente) async {
-    // 1. Récupérer et cacher le client
     Client? client;
     if (vente.clientLocalId != null && !clientsCache.containsKey(vente.localId)) {
       client = await db.getClientById(vente.clientLocalId!);
@@ -159,7 +155,6 @@ class _GestionFacturesState extends State<GestionFactures> {
       client = clientsCache[vente.localId];
     }
 
-    // 2. Récupérer et cacher les lignes de vente
     List<LigneVente> lignes = [];
     if (vente.localId != null && !lignesCache.containsKey(vente.localId)) {
       lignes = await db.getLignesByVente(vente.localId!);
@@ -347,14 +342,12 @@ class _GestionFacturesState extends State<GestionFactures> {
 
     try {
       final totals = _calculateTotals();
-      // CORRECTION DU TYPE: Nous créons une Map<String, String> simple pour les totaux
-      // L'erreur précédente était due à List<Map<String, String>>
       final totalsForReport = {
         'Stock Articles Vendus': totals['totalArticlesVendues']?.toStringAsFixed(0) ?? '0',
         'Nb Transactions': totals['totalFactures']?.toStringAsFixed(0) ?? '0',
-        'Valeur Facturée': '${totals['totalValeurAttendueFC']?.toStringAsFixed(0) ?? '0'} FC',
-        'Valeur Encaissée': '${totals['totalValeurCashFC']?.toStringAsFixed(0) ?? '0'} FC',
-        'Créances Restantes': '${(totals['totalValeurAttendueFC']! - totals['totalValeurCashFC']!).toStringAsFixed(0)} FC',
+        'Valeur Facturée': '${totals['totalFactureFC']?.toStringAsFixed(0) ?? '0'} FC',
+        'Valeur Encaissée': '${totals['totalEncaisseFC']?.toStringAsFixed(0) ?? '0'} FC',
+        'Créances Restantes': '${(totals['totalFactureFC']! - totals['totalEncaisseFC']!).toStringAsFixed(0)} FC',
       };
 
       final pdfBytes = await pdf_service.generateListReport(
@@ -394,13 +387,12 @@ class _GestionFacturesState extends State<GestionFactures> {
 
     try {
       final totals = _calculateTotals();
-      // CORRECTION DU TYPE: Nous créons une Map<String, String> simple pour les totaux
       final totalsForReport = {
         'Stock Articles Vendus': totals['totalArticlesVendues']?.toStringAsFixed(0) ?? '0',
         'Nb Transactions': totals['totalFactures']?.toStringAsFixed(0) ?? '0',
-        'Valeur Facturée': '${totals['totalValeurAttendueFC']?.toStringAsFixed(0) ?? '0'} FC',
-        'Valeur Encaissée': '${totals['totalValeurCashFC']?.toStringAsFixed(0) ?? '0'} FC',
-        'Créances Restantes': '${(totals['totalValeurAttendueFC']! - totals['totalValeurCashFC']!).toStringAsFixed(0)} FC',
+        'Valeur Facturée': '${totals['totalFactureFC']?.toStringAsFixed(0) ?? '0'} FC',
+        'Valeur Encaissée': '${totals['totalEncaisseFC']?.toStringAsFixed(0) ?? '0'} FC',
+        'Créances Restantes': '${(totals['totalFactureFC']! - totals['totalEncaisseFC']!).toStringAsFixed(0)} FC',
       };
 
       final pdfBytes = await pdf_service.generateListReport(
@@ -421,128 +413,106 @@ class _GestionFacturesState extends State<GestionFactures> {
   }
   // Fin Fonctions rapport
 
-  // --- LOGIQUE DE CALCUL DES TOTAUX Ventes ---
-  // Calcule les 4 agrégats (plus la créance) à partir des ventes filtrées.
+  // --- LOGIQUE DE CALCUL DES TOTAUX Ventes (CORRIGÉE AVEC modePaiement) ---
   Map<String, double> _calculateTotals() {
-    // 1. Nombre de Factures (Stock Vendu - Nombre de Transactions)
     final totalFactures = filteredVentes.length.toDouble();
+    double totalArticlesVendues = 0;
 
-    double totalArticlesVendues = 0; // 2. Stock Article Vendu (Quantité Totale d'articles)
-    double totalValeurAttendueFC = 0; // 3. Valeur Attendue (Créances / Total Facturé = totalNet)
-    double totalValeurCashFC = 0;      // 4. Valeur Cash (Montant Payé)
+    double totalFactureFC = 0;
+    double totalEncaisseFC = 0;
 
     for (var vente in filteredVentes) {
-      // ⚠️ CORRECTION: Nous utilisons le champ 'totalNet' (Valeur Attendue)
-      totalValeurAttendueFC += vente.totalNet;
+      totalFactureFC += vente.totalNet;
 
-      // ⚠️ CORRECTION: Remplacez 'montantPaye' par 'montantEncaisse' (ou le nom exact dans votre modèle Vente)
-      // Si ce champ est bien 'montantEncaisse', assurez-vous qu'il existe dans le modèle Vente.
-      // J'utilise le nom supposé:
-      totalValeurCashFC += vente.montantEncaisse ?? 0.0;
+      final modePaiement = vente.modePaiement?.toUpperCase() ?? 'INCONNU';
 
-      // Pour la quantité d'articles, nous nous fions au cache des lignes chargées précédemment.
-      final localId = vente.localId;
-      if (localId != null && lignesCache.containsKey(localId)) {
-        // Si déjà en cache
-        for (var ligne in lignesCache[localId]!) {
-          totalArticlesVendues += (ligne.quantite ?? 0).toDouble();
-        }
+      // Si le mode est CASH ou TRANSFERT, on suppose que le montant NET est intégralement encaissé.
+      if (modePaiement == 'CASH' || modePaiement == 'TRANSFERT') {
+        totalEncaisseFC += vente.totalNet;
       }
+      // Si 'CREDIT' ou 'INCONNU', totalEncaisseFC n'augmente pas.
     }
 
     return {
       'totalFactures': totalFactures,
       'totalArticlesVendues': totalArticlesVendues,
-      'totalValeurAttendueFC': totalValeurAttendueFC,
-      'totalValeurCashFC': totalValeurCashFC,
+      'totalFactureFC': totalFactureFC,
+      'totalEncaisseFC': totalEncaisseFC,
     };
   }
 
-  // --- WIDGET D'AFFICHAGE DES TOTAUX (Adapté) ---
+  // --- WIDGET D'AFFICHAGE DES TOTAUX (Simplifié, Créances en ligne) ---
   Widget _buildTotalsRow(Map<String, double> totals) {
     final f = NumberFormat("#,###", "fr_FR");
     const Color clearBlack = Colors.black87;
 
-    // Récupération des totaux
     final totalArticles = totals['totalArticlesVendues']?.toStringAsFixed(0) ?? '0';
     final totalTransactions = totals['totalFactures']?.toStringAsFixed(0) ?? '0';
-    final totalAttendue = totals['totalValeurAttendueFC'] ?? 0.0;
-    final totalCash = totals['totalValeurCashFC'] ?? 0.0;
+    final totalFacture = totals['totalFactureFC'] ?? 0.0;
+    final totalCash = totals['totalEncaisseFC'] ?? 0.0;
 
-    // Calcul de la différence (Créances restantes)
-    final creancesRestantes = totalAttendue - totalCash;
-    final colorCreances = creancesRestantes > 0 ? Colors.red.shade700 : (creancesRestantes < 0 ? Colors.blue.shade700 : Colors.green.shade700);
+    final creancesRestantes = totalFacture - totalCash;
+    // Rouge si créance (> 0), Vert si soldé (<= 0)
+    final colorCreances = creancesRestantes > 0 ? Colors.red.shade700 : Colors.green.shade700;
 
-    // Liste des agrégats pour les 4 colonnes
+    // Liste des CINQ agrégats pour les colonnes
     final totalStats = [
       _TotalStat(title: 'Stock Articles Vendus', value: totalArticles, color: clearBlack, isQuantity: true),
       _TotalStat(title: 'Nb Transactions (Factures)', value: totalTransactions, color: clearBlack, isQuantity: true),
-      _TotalStat(title: 'Valeur Totale Facturée', value: '${f.format(totalAttendue)} FC', color: clearBlack),
+      _TotalStat(title: 'Valeur Totale Facturée', value: '${f.format(totalFacture)} FC', color: clearBlack),
       _TotalStat(title: 'Valeur Totale Encaissée', value: '${f.format(totalCash)} FC', color: clearBlack, isBold: true, fontSize: 18),
+
+      // NOUVEL AGRÉGAT : Créances, maintenant en ligne et démarqué
+      _TotalStat(
+        title: 'Créances/Dette Restante',
+        value: '${f.format(creancesRestantes)} FC',
+        color: colorCreances,
+        isBold: true,
+        fontSize: 16,
+        isQuantity: false,
+      ),
     ];
 
     return Container(
       padding: const EdgeInsets.all(15.0),
       decoration: BoxDecoration(
-        color: Colors.lightGreen.shade50, // Couleur pour les ventes
+        color: Colors.lightGreen.shade50,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.lightGreen.shade200),
       ),
-      child: Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // 1. Colonne du Titre (COTÉ GAUCHE)
-              const Padding(
-                padding: EdgeInsets.only(right: 20.0),
-                child: Text(
-                    'AGRÉGATS VENTES :',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF13132D),
-                        fontSize: 20
-                    )
-                ),
-              ),
-
-              const VerticalDivider(thickness: 2, color: Colors.lightGreen),
-
-              // 2. Les 4 Agrégats en colonnes égales
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: totalStats.map((stat) => Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10.0),
-                      child: stat,
-                    ),
-                  )).toList(),
-                ),
-              ),
-            ],
+          // Colonne du Titre
+          const Padding(
+            padding: EdgeInsets.only(right: 20.0),
+            child: Text(
+                'TOTAUX :',
+                style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF13132D),
+                    fontSize: 20
+                )
+            ),
           ),
 
-          const SizedBox(height: 10),
+          // Séparateur vertical.
+          const SizedBox(
+            height: 50,
+            child: VerticalDivider(thickness: 2, color: Colors.lightGreen),
+          ),
+          const SizedBox(width: 10),
 
-          // Ligne de Créances Restantes (pour le contraste)
-          Align(
-            alignment: Alignment.centerRight,
-            child: Card(
-              color: Colors.white,
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 15.0, vertical: 8.0),
-                child: _TotalStat(
-                  title: 'Créances/Dette Restante',
-                  value: '${f.format(creancesRestantes)} FC',
-                  color: colorCreances, // Rouge si créance, Bleu si trop encaissé
-                  isBold: true,
-                  fontSize: 16,
-                  isQuantity: false,
+          // Les 5 Agrégats en colonnes égales
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: totalStats.map((stat) => Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10.0),
+                  child: stat,
                 ),
-              ),
+              )).toList(),
             ),
           ),
         ],
@@ -550,7 +520,7 @@ class _GestionFacturesState extends State<GestionFactures> {
     );
   }
 
-  // --- WIDGET STATISTIQUE RÉUTILISABLE (Doit être défini dans ce fichier) ---
+  // --- WIDGET STATISTIQUE RÉUTILISABLE (Inchangé) ---
   Widget _TotalStat({
     required String title,
     required String value,
@@ -575,7 +545,6 @@ class _GestionFacturesState extends State<GestionFactures> {
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
           children: [
-            // Icône basée sur le type de statistique (Quantité ou Monétaire)
             if(isQuantity) const Icon(Icons.shopping_cart, size: 16, color: Colors.black45),
             if(!isQuantity) const Icon(Icons.monetization_on, size: 16, color: Colors.black45),
             const SizedBox(width: 4),
@@ -599,12 +568,8 @@ class _GestionFacturesState extends State<GestionFactures> {
 
   @override
   Widget build(BuildContext context) {
-
-    // Pré-charger les clients si non trouvés pour les lignes affichées
     Future.microtask(_loadClientsForFiltering);
-    // Calculer les totaux pour l'affichage (important de le faire avant le build final)
     final totals = _calculateTotals();
-
 
     return Scaffold(
       appBar: AppBar(
@@ -616,12 +581,12 @@ class _GestionFacturesState extends State<GestionFactures> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // --- NOUVELLE SECTION DES TOTAUX ---
+            // --- SECTION DES TOTAUX (Maintenant simplifié) ---
             _buildTotalsRow(totals),
             const SizedBox(height: 20),
-            // --- FIN NOUVELLE SECTION DES TOTAUX ---
+            // --- FIN SECTION DES TOTAUX ---
 
-            // Row pour la recherche et les boutons (taille ajustée)
+            // Row pour la recherche et les boutons
             Row(
               children: [
                 // 1. Zone de Recherche
@@ -659,19 +624,15 @@ class _GestionFacturesState extends State<GestionFactures> {
                             : null,
                       );
 
-                      // ⭐️ CORRECTION ERGONOMIQUE: Gérer l'annulation et la sélection
                       if (picked != null) {
                         startDate = picked.start;
-                        // Ajuster endDate à la fin du jour sélectionné
                         endDate = picked.end.add(const Duration(hours: 23, minutes: 59));
                       } else {
-                        // L'utilisateur a annulé le sélecteur
-                        // Si le filtre était déjà actif, on le désactive pour réinitialiser
                         if (startDate != null || endDate != null) {
                           startDate = null;
                           endDate = null;
                         } else {
-                          return; // Rien n'a changé
+                          return;
                         }
                       }
                       loadVentes();
@@ -715,6 +676,7 @@ class _GestionFacturesState extends State<GestionFactures> {
                     DataColumn(label: Text("Date")),
                     DataColumn(label: Text("Client")),
                     DataColumn(label: Text("Total Net")),
+                    DataColumn(label: Text("Mode Paiement")),
                     DataColumn(label: Text("Statut")),
                     DataColumn(label: Text("Détails")),
                     DataColumn(label: Text("Supprimer")),
@@ -736,6 +698,9 @@ class _GestionFacturesState extends State<GestionFactures> {
                       DataCell(Text(v.dateVente.split(' ')[0])),
                       DataCell(Text(clientName)),
                       DataCell(Text('${v.totalNet.toStringAsFixed(0)} FC', style: const TextStyle(fontWeight: FontWeight.bold))),
+
+                      DataCell(Text(v.modePaiement ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.w600))),
+
                       DataCell(Text(v.statut ?? '', style: TextStyle(color: statusColor, fontWeight: FontWeight.bold))),
                       DataCell(IconButton(
                         icon: Icon(Icons.remove_red_eye, color: Colors.blue.shade700),

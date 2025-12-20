@@ -320,8 +320,8 @@ class _StatistiquesState extends State<Statistiques> {
   @override
   Widget build(BuildContext context) {
     const Color softGrayBackground = Color(0xFFA5A9B1);
-    const int ventePageIndex = 3;
-    const int proFormaPageIndex = 4; // 💡 NOUVEL INDEX pour la Pro-Forma
+    const int ventePageIndex = 2;
+    const int proFormaPageIndex = 3; // 💡 NOUVEL INDEX pour la Pro-Forma
 
     return Scaffold(
       backgroundColor: softGrayBackground,
